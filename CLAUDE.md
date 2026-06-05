@@ -58,8 +58,10 @@ src/
   execution/broker.py     P9  Broker — bracket/limit entries, scale-out, dynamic stops
   monitoring/dashboard.py P10 Dashboard — console snapshot, alerts, daily report
   backtest/engine.py          Backtester — run() (EMA) and run_pipeline() (scorer-gated)
+  backtest/costs.py           CostModel — slippage + commission (equities/crypto presets)
+  backtest/validation.py      Validator — walk-forward OOS, PSR/DSR, bootstrap, FDR, verdict
 main.py                       Live loop wiring all phases
-tests/                        test_rr_filter.py, test_scoring_risk.py
+tests/                        test_rr_filter.py, test_scoring_risk.py, test_validation.py
 ```
 
 ## Setup & running
@@ -72,6 +74,8 @@ pip install -r requirements.txt          # incl. ta, scikit-learn, xgboost, stat
 python -m pytest tests/                   # unit tests
 python -c "from src.backtest.engine import Backtester; \
   print(Backtester().run_pipeline('AAPL', period='2y').summary())"
+python -c "from src.backtest.validation import Validator; from config import settings; \
+  print(Validator().validate(settings.WATCHLIST).verdict)"   # cost-aware significance verdict
 python main.py                            # live paper loop (Ctrl+C = graceful shutdown + report)
 ```
 
@@ -90,10 +94,12 @@ a derived `signals[...]` flag the scorer can read.
 
 ## Top upgrades toward institutional quality (cheapest first)
 
-1. Validation harness: commissions + slippage in the backtester, walk-forward
-   OOS testing, deflated-Sharpe / Monte-Carlo significance checks.
+1. ~~Validation harness~~ — **DONE** (`backtest/costs.py` + `backtest/validation.py`):
+   slippage/commission, walk-forward OOS folds, PSR/deflated-Sharpe, bootstrap
+   p-values, Monte-Carlo sequence risk, Benjamini-Hochberg FDR, explicit verdict.
+   Always run `Validator().validate(...)` before trusting any backtest.
 2. Point-in-time institutional data + execution realism (modeled fills,
-   slippage, latency, idempotent order/state reconciliation).
+   latency, idempotent order/state reconciliation).
 3. Portfolio construction (vol targeting, covariance-aware sizing,
    drawdown/regime-conditional exposure) + a formal research/validation process.
 ```

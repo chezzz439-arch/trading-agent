@@ -63,11 +63,15 @@ class Backtester:
         rr_filter: Optional[RRFilter] = None,
         initial_capital: float = 100_000.0,
         risk_per_trade: float = 0.01,
+        cost_model=None,
     ) -> None:
+        from src.backtest.costs import CostModel
         self.strategy = strategy or EMAStrategy()
         self.rr_filter = rr_filter or RRFilter()
         self.initial_capital = initial_capital
         self.risk_per_trade = risk_per_trade
+        # Default zero-cost model keeps legacy backtests unchanged.
+        self.cost_model = cost_model or CostModel()
 
     # ------------------------------------------------------------------ #
     # Data loading (yfinance)
@@ -201,10 +205,9 @@ class Backtester:
             if position is not None:
                 exit_price, outcome = self._check_exit(position, bar)
                 if exit_price is not None:
-                    pnl = self._pnl(position, exit_price)
+                    pnl, rec = self._close(position, df.index[i], exit_price, outcome)
                     equity += pnl
-                    trades.append(self._trade_record(position, df.index[i], exit_price,
-                                                     pnl, outcome))
+                    trades.append(rec)
                     position = None
             if position is None:
                 position = self._pipeline_enter(symbol, window, market, equity, fractional,
@@ -215,13 +218,36 @@ class Backtester:
 
         if position is not None:
             last_close = float(df["close"].iloc[-1])
-            pnl = self._pnl(position, last_close)
+            outcome = "win" if self._pnl(position, last_close) > 0 else "loss"
+            pnl, rec = self._close(position, df.index[-1], last_close, outcome, forced=True)
             equity += pnl
-            trades.append(self._trade_record(position, df.index[-1], last_close, pnl,
-                                             "win" if pnl > 0 else "loss", forced=True))
+            trades.append(rec)
+            if curve_val:
+                curve_val[-1] = equity   # reflect realized cost of the forced close
 
         equity_curve = pd.Series(curve_val, index=curve_idx, name="equity")
         return self._metrics(symbol, equity_curve, trades, interval)
+
+    def _close(self, position, exit_time, raw_exit_price, outcome, forced=False):
+        """Realize a trade with slippage + commission applied to both fills."""
+        side = position["side"]
+        qty = position["qty"]
+        cm = self.cost_model
+        entry_fill = cm.fill_price(position["entry"], side, is_entry=True)
+        exit_fill = cm.fill_price(raw_exit_price, side, is_entry=False)
+        direction = 1 if side == "long" else -1
+        gross = direction * (exit_fill - entry_fill) * qty
+        commission = cm.round_trip_commission(qty, entry_fill, exit_fill)
+        pnl = gross - commission
+        rec = {
+            "entry_time": position["entry_time"], "exit_time": exit_time,
+            "side": side, "entry": position["entry"], "exit": raw_exit_price,
+            "entry_fill": round(entry_fill, 4), "exit_fill": round(exit_fill, 4),
+            "qty": qty, "pnl": pnl, "commission": round(commission, 2),
+            "r_multiple": (pnl / qty) / position["risk_per_share"] if qty else 0.0,
+            "outcome": outcome, "score": position.get("score"), "forced_exit": forced,
+        }
+        return pnl, rec
 
     def _pipeline_enter(self, symbol, window, market, equity, fractional, ts,
                         tech_a, quant_a, regime_d, scorer, risk):
