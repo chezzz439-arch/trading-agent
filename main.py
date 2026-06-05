@@ -343,8 +343,13 @@ class TradingAgent:
             pos = by_sym.get(sym) or by_sym.get(sym.replace("/", ""))
             if pos is None:
                 if not mp.confirmed:
-                    # Order accepted but not filled yet (e.g. queued pre-open) —
-                    # wait for the fill rather than treating it as a close.
+                    # Pending fill. If there's no longer a working order for it,
+                    # the order was canceled/expired -> drop the phantom rather
+                    # than tracking it forever. Otherwise keep waiting.
+                    if not self.broker.has_open_order(mp.symbol):
+                        logger.info("%s: pending order gone — dropping untracked entry",
+                                    mp.symbol)
+                        self.managed.pop(mp.symbol, None)
                     continue
                 # Previously filled, now gone -> its bracket stop/target hit.
                 self._finalize_external_close(mp, equity)
