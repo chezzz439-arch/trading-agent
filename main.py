@@ -208,6 +208,7 @@ class TradingAgent:
 
     # ------------------------------------------------------------------ #
     def scan_once(self) -> None:
+        _t0 = time.time()
         equity = self.broker.get_equity()
         buying_power = self.broker.get_buying_power()
         day_start = self.portfolio._day_start_equity or equity
@@ -290,6 +291,8 @@ class TradingAgent:
         self.dashboard.print(state)
         self._write_state(positions, scores_for_dash, equity, buying_power, sentiment)
         self._scheduled_summaries(equity, day_start, sentiment)
+        logger.info("Scan complete in %.1fs (%d symbols, %d deep-analyzed)",
+                    time.time() - _t0, len(self.watchlist), len(scores_for_dash))
 
     def _prerank(self, symbol, open_symbols, order_syms, df=None):
         """Cheap pass: bars + screen + technical -> a fast ranking score.
