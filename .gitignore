@@ -9,3 +9,6 @@ venv/
 
 # harness artifacts
 .claude/
+
+# runtime
+.agent.pid
