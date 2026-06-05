@@ -64,7 +64,7 @@ class TradingAgent:
     def __init__(self) -> None:
         self._validate_credentials()
         k, s = settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY
-        self.feed = MarketFeed(k, s, stock_feed=settings.STOCK_DATA_FEED)
+        self.feed = MarketFeed(k, s, stock_feed=settings.STOCK_DATA_FEED, cache_ttl=240)
         self.technical = TechnicalAnalysis()
         self.quant = QuantAnalysis()
         self.regime_detector = RegimeDetector()
@@ -113,6 +113,7 @@ class TradingAgent:
         self._pos_pnl: dict[str, float] = {}     # last seen unrealized PnL per symbol
         self._closed_today: list[dict] = []
         self._sent: dict[str, str] = {}          # summary-type -> date/week already sent
+        self._pre_scores: dict[str, float] = {}  # last pre-rank score per symbol (tiering)
         self._streamlit_proc = None
         self._scan_count = 0
 
@@ -240,19 +241,39 @@ class TradingAgent:
 
         order_syms = self.broker.open_order_symbols()
 
-        # --- Pre-rank: cheap technical-only pass over the whole universe -- #
+        # --- Tiered selection: scan hot names every cycle, cool ones less --- #
+        # (pre-rank score is 0-35; ~21 ≈ "60+", ~14 ≈ "40+"). Open positions and
+        # never-scored symbols are always scanned.
+        cyc = self._scan_count
+        scan_set = []
+        for sym in self.watchlist:
+            held = sym in open_symbols or sym.replace("/", "") in open_symbols
+            sc = self._pre_scores.get(sym)
+            if held or sc is None or sc >= 21:
+                scan_set.append(sym)                      # Tier 1 / always
+            elif sc >= 14 and cyc % 2 == 0:
+                scan_set.append(sym)                      # Tier 2: every 2nd
+            elif cyc % 3 == 0:
+                scan_set.append(sym)                      # Tier 3: every 3rd
+
+        # --- Batch-fetch all daily bars for this cycle in one request ----- #
+        bars = self.feed.get_bars_batch(scan_set, "1Day", settings.LOOKBACK_BARS)
+
+        # --- Pre-rank: cheap technical-only pass (reusing the batched bars) - #
         candidates = []
-        for symbol in self.watchlist:
+        for symbol in scan_set:
             try:
-                c = self._prerank(symbol, open_symbols, order_syms)
+                c = self._prerank(symbol, open_symbols, order_syms, df=bars.get(symbol))
+                self._pre_scores[symbol] = c["pre_score"] if c else 0.0
                 if c is not None:
                     candidates.append(c)
             except Exception:
                 logger.exception("Pre-rank failed for %s", symbol)
         candidates.sort(key=lambda c: c["pre_score"], reverse=True)
         top = candidates[: settings.PRERANK_TOP_N]
-        logger.info("Pre-ranked %d/%d candidates; deep-analyzing top %d",
-                    len(candidates), len(self.watchlist), len(top))
+        logger.info("Pre-ranked %d candidates from %d/%d scanned this cycle (tiered); "
+                    "deep-analyzing top %d", len(candidates), len(scan_set),
+                    len(self.watchlist), len(top))
 
         # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
         scores_for_dash = []
@@ -270,19 +291,20 @@ class TradingAgent:
         self._write_state(positions, scores_for_dash, equity, buying_power, sentiment)
         self._scheduled_summaries(equity, day_start, sentiment)
 
-    def _prerank(self, symbol, open_symbols, order_syms):
+    def _prerank(self, symbol, open_symbols, order_syms, df=None):
         """Cheap pass: bars + screen + technical -> a fast ranking score.
 
-        Returns a candidate dict (reusing the fetched df + technical so the full
-        pass doesn't recompute them) or None to skip the symbol.
+        Reuses the batch-fetched ``df`` when provided. Returns a candidate dict
+        (carrying df + technical so the full pass doesn't recompute) or None.
         """
         if symbol in open_symbols or symbol.replace("/", "") in open_symbols:
             return None
         if symbol in order_syms or symbol.replace("/", "") in order_syms:
             return None
 
-        df = self.feed.get_bars(symbol, "1Day", settings.LOOKBACK_BARS)
-        if df.empty or len(df) < 60:
+        if df is None:
+            df = self.feed.get_bars(symbol, "1Day", settings.LOOKBACK_BARS)
+        if df is None or df.empty or len(df) < 60:
             return None
 
         eligible, reason = self.screener.passes(symbol, df)

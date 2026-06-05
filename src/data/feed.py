@@ -66,11 +66,29 @@ class MarketFeed:
         api_key: str,
         secret_key: str,
         stock_feed: str = "iex",
+        cache_ttl: int = 0,
     ) -> None:
         self._stock_client = StockHistoricalDataClient(api_key, secret_key)
         # Crypto data is public; keys are accepted but not required.
         self._crypto_client = CryptoHistoricalDataClient(api_key, secret_key)
         self._stock_feed = stock_feed
+        self.cache_ttl = cache_ttl                 # seconds; 0 disables caching
+        self._cache: dict[tuple, tuple] = {}       # (sym, tf, lookback) -> (df, ts)
+
+    # ------------------------------------------------------------------ #
+    # Cache
+    # ------------------------------------------------------------------ #
+    def _cache_get(self, key) -> Optional[pd.DataFrame]:
+        if self.cache_ttl <= 0:
+            return None
+        hit = self._cache.get(key)
+        if hit and (datetime.now(timezone.utc) - hit[1]).total_seconds() < self.cache_ttl:
+            return hit[0]
+        return None
+
+    def _cache_put(self, key, df: pd.DataFrame) -> None:
+        if self.cache_ttl > 0:
+            self._cache[key] = (df, datetime.now(timezone.utc))
 
     def get_bars(
         self,
@@ -81,16 +99,89 @@ class MarketFeed:
         """Return up to ``lookback`` recent bars as an OHLCV DataFrame.
 
         Columns: ``open, high, low, close, volume``; indexed by timestamp,
-        sorted oldest-first. Returns an empty DataFrame on any error.
+        sorted oldest-first. Returns an empty DataFrame on any error. Cached for
+        ``cache_ttl`` seconds when enabled.
         """
         tf = parse_timeframe(timeframe) if isinstance(timeframe, str) else timeframe
+        key = (symbol, str(tf.value if hasattr(tf, "value") else tf), lookback)
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
         try:
-            if is_crypto(symbol):
-                return self._get_crypto_bars(symbol, tf, lookback)
-            return self._get_stock_bars(symbol, tf, lookback)
+            df = (self._get_crypto_bars(symbol, tf, lookback) if is_crypto(symbol)
+                  else self._get_stock_bars(symbol, tf, lookback))
+            self._cache_put(key, df)
+            return df
         except Exception:
             logger.exception("Failed to fetch bars for %s", symbol)
             return pd.DataFrame()
+
+    def get_bars_batch(
+        self,
+        symbols: list[str],
+        timeframe: str | TimeFrame,
+        lookback: int = 300,
+    ) -> dict[str, pd.DataFrame]:
+        """Fetch many symbols in one request per asset class (huge speed win).
+
+        Returns {symbol: df}; symbols with no data get an empty frame. Uses and
+        fills the cache, so already-cached symbols aren't refetched.
+        """
+        tf = parse_timeframe(timeframe) if isinstance(timeframe, str) else timeframe
+        tf_str = str(tf.value if hasattr(tf, "value") else tf)
+        out: dict[str, pd.DataFrame] = {}
+        need_stock, need_crypto = [], []
+        for s in symbols:
+            cached = self._cache_get((s, tf_str, lookback))
+            if cached is not None:
+                out[s] = cached
+            elif is_crypto(s):
+                need_crypto.append(s)
+            else:
+                need_stock.append(s)
+
+        for group, fetch in ((need_stock, self._batch_stock), (need_crypto, self._batch_crypto)):
+            if not group:
+                continue
+            try:
+                frames = fetch(group, tf, lookback)
+            except Exception:
+                logger.exception("Batch fetch failed for %d symbols", len(group))
+                frames = {}
+            for s in group:
+                df = frames.get(s, pd.DataFrame())
+                self._cache_put((s, tf_str, lookback), df)
+                out[s] = df
+        return out
+
+    def _batch_stock(self, symbols, tf, lookback) -> dict[str, pd.DataFrame]:
+        req = StockBarsRequest(
+            symbol_or_symbols=symbols, timeframe=tf,
+            start=self._window_start(tf, lookback),
+            end=datetime.now(timezone.utc) - timedelta(minutes=16),
+            feed=self._stock_feed)
+        return self._split(self._stock_client.get_stock_bars(req).df, symbols, lookback)
+
+    def _batch_crypto(self, symbols, tf, lookback) -> dict[str, pd.DataFrame]:
+        req = CryptoBarsRequest(symbol_or_symbols=symbols, timeframe=tf,
+                                start=self._window_start(tf, lookback))
+        return self._split(self._crypto_client.get_crypto_bars(req).df, symbols, lookback)
+
+    @staticmethod
+    def _split(df, symbols, lookback) -> dict[str, pd.DataFrame]:
+        out = {}
+        if df is None or df.empty:
+            return out
+        keep = [c for c in ("open", "high", "low", "close", "volume") if c in df.columns]
+        if isinstance(df.index, pd.MultiIndex):
+            for s in symbols:
+                try:
+                    out[s] = df.xs(s, level="symbol")[keep].sort_index().tail(lookback)
+                except KeyError:
+                    continue
+        elif len(symbols) == 1:
+            out[symbols[0]] = df[keep].sort_index().tail(lookback)
+        return out
 
     # ------------------------------------------------------------------ #
     # Internal helpers
