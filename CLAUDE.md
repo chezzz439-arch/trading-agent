@@ -64,8 +64,14 @@ src/
   backtest/engine.py          Backtester — run() (EMA) and run_pipeline() (scorer-gated)
   backtest/costs.py           CostModel — slippage + commission (equities/crypto presets)
   backtest/validation.py      Validator — walk-forward OOS, PSR/DSR, bootstrap, FDR, verdict
-main.py                       Live loop wiring all phases
-tests/                        test_rr_filter.py, test_scoring_risk.py, test_validation.py
+  execution/position_manager.py P9 lifecycle — scale-outs, breakeven/trail, time
+                              exit, exact realized PnL; PositionStore persists to JSON
+main.py                       Live loop wiring all phases + position management
+scripts/daily_review.py       rich end-of-day review + tuning recommendation
+scripts/market_open.py        9:25am pre-market briefing -> Telegram + file
+start.sh / stop.sh            one-command launch / graceful shutdown
+tests/                        test_rr_filter, test_scoring_risk, test_validation,
+                              test_position_manager  (42 tests)
 ```
 
 ## Setup & running
