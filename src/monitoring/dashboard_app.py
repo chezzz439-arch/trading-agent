@@ -1,271 +1,535 @@
-"""Layer 1 — Streamlit dashboard.
+"""Beginner-friendly trading dashboard — "Cash App meets Robinhood".
 
-Five pages (Overview / Positions / Signal Scanner / Performance / Backtest) that
-read the agent's shared state (``StateStore``) plus live Alpaca account data and
-can run backtests on demand. Live pages auto-refresh every 30 s.
+Five plain-English pages (Your Money / Trades / Watching / Performance / Bot)
+with big friendly numbers, green=up/red=down, emojis, and a glossary. Reads the
+agent's live state + Alpaca account; falls back to clearly-labelled sample data
+so every page looks full before the bot has traded.
 
-Run:  ``streamlit run src/monitoring/dashboard_app.py``  →  http://localhost:8501
-
-The dashboard runs in its own process; it talks to the agent only through the
-shared state file, so the HALT button writes a control flag the agent polls.
+Run:  streamlit run src/monitoring/dashboard_app.py  ->  http://localhost:8501
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
+import datetime as _dt
 
-# Streamlit reruns this script in a worker thread that may not have an asyncio
-# event loop (or has a closed one), which breaks libraries that use asyncio
-# (Alpaca/yfinance) with "RuntimeError: Event loop is closed" on Python 3.14.
-# Ensure every run has a live loop for the current thread.
+# A live asyncio loop per script run (Py3.14 + Alpaca/yfinance otherwise raise
+# "Event loop is closed" across Streamlit reruns).
 try:
     asyncio.get_event_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from config import settings
+from src.monitoring.sample_data import build_sample
 from src.monitoring.state_store import StateStore
 
-st.set_page_config(page_title="Trading Agent", layout="wide", page_icon="📈")
-REFRESH_SECONDS = 30
+st.set_page_config(page_title="My Trading Bot", layout="wide", page_icon="💰",
+                   initial_sidebar_state="collapsed")
+
+GREEN, RED, GREY, INK, SUB = "#00B843", "#F23645", "#8A94A6", "#0E1117", "#6B7280"
+
+st.markdown(f"""
+<style>
+  .block-container {{padding-top: 1rem; max-width: 980px;}}
+  #MainMenu, footer {{visibility: hidden;}}
+  .hero {{background: linear-gradient(135deg,#0E1117,#1c2230); color:#fff;
+          border-radius:22px; padding:26px 28px; margin-bottom:14px;}}
+  .hero .label {{color:#9aa4b2; font-size:15px; font-weight:600;}}
+  .hero .big {{font-size:46px; font-weight:800; letter-spacing:-1px; margin:2px 0;}}
+  .card {{background:#fff; border:1px solid #eef0f4; border-radius:18px;
+          padding:18px 20px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.04);}}
+  .mini .v {{font-size:24px; font-weight:800; color:{INK};}}
+  .mini .l {{font-size:13px; color:{SUB}; font-weight:600;}}
+  .mini .s {{font-size:12px; color:{GREY};}}
+  .pos-title {{font-size:20px; font-weight:800; color:{INK};}}
+  .tag {{font-size:13px; font-weight:800; padding:4px 12px; border-radius:999px;}}
+  .row {{display:flex; justify-content:space-between; align-items:center;}}
+  .muted {{color:{SUB}; font-size:14px;}}
+  .reason {{font-size:14px; color:{INK}; margin:2px 0;}}
+  .bar {{position:relative; height:10px; background:#eef0f4; border-radius:999px; margin:10px 0;}}
+  .bar > .fill {{position:absolute; left:0; top:0; bottom:0; background:{GREEN}; border-radius:999px;}}
+  .bar > .dot {{position:absolute; top:-5px; width:20px; height:20px; background:#fff;
+                border:3px solid {GREEN}; border-radius:50%; transform:translateX(-50%);}}
+  .feed {{font-size:14px; color:{INK}; padding:8px 0; border-bottom:1px solid #f1f3f7;}}
+  .pill {{display:inline-block; font-size:12px; font-weight:700; color:{SUB};
+          background:#f4f6fa; border-radius:999px; padding:2px 10px; margin-right:6px;}}
+</style>
+""", unsafe_allow_html=True)
 
 
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
 @st.cache_resource
 def get_store() -> StateStore:
     return StateStore(log_dir=settings.LOG_DIR)
 
 
-@st.cache_resource
-def get_broker():
-    from src.execution.broker import Broker
-    return Broker(settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY, paper=settings.PAPER)
+def money(x: float, cents: bool = True) -> str:
+    return f"${x:,.2f}" if cents else f"${x:,.0f}"
 
 
-def _equity_df(state: dict) -> pd.DataFrame:
-    hist = state.get("equity_history", [])
-    if not hist:
-        return pd.DataFrame(columns=["t", "equity"])
-    df = pd.DataFrame(hist)
-    df["t"] = pd.to_datetime(df["t"])
-    return df
+def signed(x: float) -> str:
+    return f"+{money(x)}" if x >= 0 else f"-{money(abs(x))}"
 
 
-def _metric_card(col, label, value, delta=None):
-    col.metric(label, value, delta)
+def col_for(x: float) -> str:
+    return GREEN if x >= 0 else RED
+
+
+def dot(good: bool) -> str:
+    return "🟢" if good else "🔴"
 
 
 # --------------------------------------------------------------------------- #
-# Pages
+# Data — live state mapped into the sample shape, or the sample itself
 # --------------------------------------------------------------------------- #
-def page_overview(state):
-    st.header("Live Overview")
-    if not state:
-        st.warning("No agent state yet — start the agent (`python main.py`) to populate.")
-    equity = state.get("equity", 0.0)
-    daily = state.get("daily_pnl", 0.0)
-    weekly = state.get("weekly_pnl", 0.0)
-    regime = state.get("risk_state", "unknown")
-    halted = state.get("halted", False)
-
-    c1, c2, c3, c4 = st.columns(4)
-    _metric_card(c1, "Equity", f"${equity:,.2f}")
-    _metric_card(c2, "Daily PnL", f"${daily:,.2f}", f"{daily:+,.2f}")
-    _metric_card(c3, "Weekly PnL", f"${weekly:,.2f}", f"{weekly:+,.2f}")
-    badge = "🟢 ACTIVE" if not halted else "🔴 HALTED"
-    c4.markdown(f"### {badge}")
-    c4.markdown(f"**Regime:** `{regime}`")
-
-    # Equity chart
-    df = _equity_df(state)
-    if not df.empty:
-        fig = go.Figure(go.Scatter(x=df["t"], y=df["equity"], mode="lines",
-                                   line=dict(color="#2ca02c")))
-        fig.update_layout(title="Account Equity", height=380, margin=dict(t=40, b=20))
-        st.plotly_chart(fig, width="stretch")
-    else:
-        st.info("Equity history accumulates as the agent runs.")
-
-    st.divider()
-    st.subheader("Kill Switch")
-    if halted:
-        st.error("Trading is HALTED.")
-    else:
-        if st.button("🛑  HALT ALL TRADING", type="primary", width="stretch"):
-            get_store().request_halt("manual HALT from Streamlit dashboard")
-            st.error("HALT requested — the agent will flatten the book on its next loop.")
+_EMOJI = {"AAPL": "🍎", "NVDA": "🎮", "TSLA": "⚡", "MSFT": "🪟", "AMZN": "🛒",
+          "GOOGL": "🔍", "META": "👥", "AMD": "💻", "NFLX": "📺", "JPM": "🏦",
+          "BTC/USD": "🟠", "ETH/USD": "💎", "SOL/USD": "☀️", "HOOD": "🪶"}
 
 
-def page_positions(state):
-    st.header("Positions")
-    st.subheader("Open positions")
-    try:
-        positions = get_broker().get_positions()
-        rows = []
-        for p in positions:
-            rows.append({
-                "Symbol": p.symbol, "Side": getattr(p, "side", ""),
-                "Qty": p.qty, "Entry": float(p.avg_entry_price),
-                "Current": float(getattr(p, "current_price", 0) or 0),
-                "Unreal PnL": float(getattr(p, "unrealized_pl", 0) or 0),
-                "Unreal %": float(getattr(p, "unrealized_plpc", 0) or 0) * 100,
-            })
-        st.dataframe(pd.DataFrame(rows) if rows else pd.DataFrame({"info": ["no open positions"]}),
-                     width="stretch")
-    except Exception as e:
-        st.error(f"Could not load positions from Alpaca: {e}")
+def _emoji(sym: str) -> str:
+    return _EMOJI.get(sym, "📈")
 
-    st.subheader("Closed today")
+
+def build_live(state: dict) -> dict:
+    started = 100_000.0
+    equity = float(state.get("equity") or started)
     closed = state.get("closed_today", [])
-    st.dataframe(pd.DataFrame(closed) if closed else pd.DataFrame({"info": ["none yet"]}),
-                 width="stretch")
+    wins = sum(1 for t in closed if t.get("pnl", 0) > 0)
+    positions = []
+    managed = {m["symbol"]: m for m in state.get("managed", [])}
+    for p in state.get("open_positions", []):
+        sym = p.get("symbol", "?")
+        m = managed.get(sym, {})
+        entry = float(m.get("entry") or 0)
+        positions.append({
+            "emoji": _emoji(sym), "name": sym, "symbol": sym,
+            "shares": p.get("qty", 0), "paid": entry, "now": 0.0,
+            "cost": 0.0, "value": 0.0, "pnl": float(p.get("pnl", 0)),
+            "pnl_pct": float(p.get("pnl_pct", 0)), "target": float(m.get("target") or 0),
+            "stop": float(m.get("current_stop") or 0),
+            "progress": max(0.0, min(1.0, float(m.get("last_r") or 0) / 4.0)),
+            "score": float(m.get("score") or 0),
+            "reasons": ["Passed the bot's full checklist"],
+        })
+    watching = []
+    for s in sorted(state.get("scores", []), key=lambda d: d.get("score", 0), reverse=True):
+        sc = s.get("score", 0)
+        view = "BULLISH" if sc >= 70 else "BEARISH" if sc < 50 else "NEUTRAL"
+        watching.append({
+            "emoji": _emoji(s["symbol"]), "name": s["symbol"], "symbol": s["symbol"],
+            "price": 0.0, "chg": 0.0, "view": view, "score": sc,
+            "status": "OWNED" if s["symbol"] in managed else (
+                "WATCHING" if sc >= 50 else "AVOIDING"),
+            "reasons": ["Bot's live confidence score"]})
+    return {
+        "is_sample": False, "started": started, "equity": equity,
+        "daily_pnl": float(state.get("daily_pnl", 0)),
+        "daily_pct": float(state.get("daily_pnl", 0)) / started * 100,
+        "all_time_pnl": equity - started, "all_time_pct": (equity - started) / started * 100,
+        "win_rate": (wins / len(closed)) if closed else 0.0,
+        "equity_history": state.get("equity_history", []),
+        "positions": positions,
+        "trades": [{"emoji": _emoji(t.get("symbol", "")), "name": t.get("symbol", "?"),
+                    "symbol": t.get("symbol", "?"), "win": t.get("pnl", 0) >= 0,
+                    "bought_on": "—", "bought_at": 0, "sold_on": "—", "sold_at": 0,
+                    "days": 0, "pnl": float(t.get("pnl", 0)),
+                    "pnl_pct": t.get("r_multiple", 0), "score": 0, "note": ""}
+                   for t in closed],
+        "watching": watching, "activity": [],
+        "bot": {"running": not state.get("halted", False), "last_scan_min": 0,
+                "next_scan_min": 5, "uptime": "—", "scans_today": 0,
+                "setups_looked": 0, "trades_taken": len(positions),
+                "setups_rejected": 0, "daily_loss_used": max(0.0, -float(state.get("daily_pnl", 0))),
+                "daily_loss_limit": started * settings.DAILY_LOSS_LIMIT,
+                "telegram": True, "broker": True, "logging": True,
+                "min_score": settings.MIN_SCORE, "rr": settings.RR_RATIO,
+                "risk_pct": settings.RISK_PER_TRADE * 100},
+        "performance": {"sharpe": 0.0, "max_drawdown_pct": 0.0, "max_drawdown_dollar": 0,
+                        "avg_winner": 0.0, "avg_loser": 0.0, "monthly": []},
+    }
 
 
-def _score_color(score):
-    return "#d62728" if score < 50 else "#ff7f0e" if score < 70 else "#2ca02c"
+def load_data():
+    state = get_store().read_state()
+    has_real = bool(state.get("open_positions") or state.get("closed_today"))
+    default = "Live" if has_real else "Demo"
+    mode = st.session_state.get("data_mode", default)
+    return (build_sample() if mode == "Demo" else build_live(state)), mode, default
 
 
-def page_scanner(state):
-    st.header("Signal Scanner")
-    scores = state.get("scores", [])
-    if not scores:
-        st.info("No scores yet — the agent writes them each scan. You can also scan one "
-                "symbol on demand below.")
+# --------------------------------------------------------------------------- #
+# Shared UI
+# --------------------------------------------------------------------------- #
+GLOSSARY = {
+    "Safety net (stop loss)": "A safety net price. If the stock drops to this price, "
+        "the bot automatically sells to prevent bigger losses.",
+    "Target price": "The price the bot thinks the stock could reach. When it gets "
+        "there, the bot sells for profit.",
+    "Score": "How confident the bot is about a trade. 100 = extremely confident, "
+        "0 = no confidence.",
+    "4:1 ratio": "For every $1 the bot risks, it tries to make $4 back.",
+}
+
+
+def top_bar(d: dict, mode: str):
+    up = d["daily_pnl"] >= 0
+    st.markdown(
+        f"<div class='row'>"
+        f"<div><span class='pill'>🤖 Bot {dot(d['bot']['running'])}</span>"
+        f"<span class='pill'>{'🧪 Sample data' if mode=='Demo' else '🔴 Live data'}</span></div>"
+        f"<div style='text-align:right'><span style='font-weight:800;font-size:18px'>{money(d['equity'])}</span> "
+        f"<span style='color:{col_for(d['daily_pnl'])};font-weight:700'>"
+        f"{'▲' if up else '▼'} {signed(d['daily_pnl'])} today</span></div></div>",
+        unsafe_allow_html=True)
+
+
+def friendly_glossary():
+    st.caption("Tap to learn a term:")
+    cols = st.columns(len(GLOSSARY))
+    for col, (term, defn) in zip(cols, GLOSSARY.items()):
+        with col:
+            with st.popover(f"❓ {term.split('(')[0].strip()}"):
+                st.markdown(f"**{term}**\n\n{defn}")
+
+
+# --------------------------------------------------------------------------- #
+# PAGE 1 — Your Money
+# --------------------------------------------------------------------------- #
+def page_home(d):
+    up = d["daily_pnl"] >= 0
+    st.markdown(
+        f"<div class='hero'><div class='label'>Your Portfolio</div>"
+        f"<div class='big'>{money(d['equity'])}</div>"
+        f"<div style='font-size:17px;font-weight:700;color:{'#00E676' if up else '#FF6E6E'}'>"
+        f"{'▲' if up else '▼'} {signed(d['daily_pnl'])} today ({d['daily_pct']:+.2f}%) {dot(up)}</div></div>",
+        unsafe_allow_html=True)
+
+    # Equity chart with timeframe selector
+    hist = d.get("equity_history", [])
+    tf = st.radio("timeframe", ["1D", "1W", "1M", "3M", "ALL"], index=4,
+                  horizontal=True, label_visibility="collapsed")
+    if hist:
+        n = {"1D": 2, "1W": 5, "1M": 21, "3M": 63, "ALL": len(hist)}[tf]
+        seg = hist[-n:]
+        ys = [p["equity"] for p in seg]
+        line = GREEN if ys[-1] >= ys[0] else RED
+        fig = go.Figure(go.Scatter(y=ys, mode="lines", line=dict(color=line, width=3),
+                                   fill="tozeroy", fillcolor="rgba(0,184,67,.08)"))
+        fig.update_layout(height=240, margin=dict(l=0, r=0, t=6, b=0),
+                          xaxis=dict(visible=False),
+                          yaxis=dict(visible=False), plot_bgcolor="#fff", paper_bgcolor="#fff")
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+    # Four mini cards
+    c1, c2, c3, c4 = st.columns(4)
+    _mini(c1, "💵 Started", money(d["started"], cents=False), "your deposit")
+    _mini(c2, "📈 Now Worth", money(d["equity"], cents=False), "right now")
+    _mini(c3, "🎯 All Time", f"{signed(d['all_time_pnl'])}", f"{d['all_time_pct']:+.2f}% profit/loss",
+          color=col_for(d["all_time_pnl"]))
+    _mini(c4, "🏆 Win Rate", f"{d['win_rate']*100:.0f}%", "of trades are winners")
+
+    st.markdown("### What You Own Right Now")
+    if d["positions"]:
+        for p in d["positions"]:
+            _position_card(p)
     else:
-        # Heatmap-style colored bars.
-        fig = go.Figure()
-        syms = [s["symbol"] for s in scores]
-        vals = [s["score"] for s in scores]
-        colors = [_score_color(v) for v in vals]
-        fig.add_bar(x=vals, y=syms, orientation="h", marker_color=colors,
-                    text=[f"{v:.0f}" for v in vals], textposition="outside")
-        fig.update_layout(title="Current scores (0-100)", height=420, xaxis_range=[0, 100],
-                          margin=dict(t=40))
-        st.plotly_chart(fig, width="stretch")
+        st.markdown(
+            "<div class='card'><div class='pos-title'>🔍 No open trades right now</div>"
+            "<p class='muted'>Your bot is scanning the markets every 5 minutes looking for the "
+            "perfect setup. When it finds one that scores 70/100 or higher with 4-to-1 profit "
+            "potential, it buys automatically.</p>"
+            "<span class='pill'>Last scan: a few minutes ago</span>"
+            "<span class='pill'>Next scan: soon</span></div>", unsafe_allow_html=True)
+
+    if d.get("activity"):
+        st.markdown("### Recent Activity")
+        rows = "".join(f"<div class='feed'>{a['icon']} <b>{a['ago']}</b> — {a['text']}</div>"
+                       for a in d["activity"])
+        st.markdown(f"<div class='card'>{rows}</div>", unsafe_allow_html=True)
+
+
+def _mini(col, label, value, sub, color=INK):
+    col.markdown(f"<div class='card mini'><div class='l'>{label}</div>"
+                 f"<div class='v' style='color:{color}'>{value}</div>"
+                 f"<div class='s'>{sub}</div></div>", unsafe_allow_html=True)
+
+
+def _position_card(p):
+    making = p["pnl"] >= 0
+    tag = (f"<span class='tag' style='background:#e7f9ee;color:{GREEN}'>MAKING MONEY 🟢</span>"
+           if making else f"<span class='tag' style='background:#fdeaec;color:{RED}'>DOWN A BIT 🔴</span>")
+    prog = max(0, min(100, p["progress"] * 100))
+    reasons = "".join(f"<div class='reason'>✅ {r}</div>" for r in p["reasons"])
+    st.markdown(f"""
+<div class='card'>
+  <div class='row'><div class='pos-title'>{p['emoji']} {p['name']} ({p['symbol']})</div>{tag}</div>
+  <p class='muted' style='margin:6px 0'>You own <b>{p['shares']}</b> shares ·
+     paid <b>{money(p['paid'])}</b> · worth <b>{money(p['now']) if p['now'] else 'updating…'}</b></p>
+  <div style='font-size:22px;font-weight:800;color:{col_for(p['pnl'])}'>
+     {signed(p['pnl'])} ({p['pnl_pct']:+.1f}%) {dot(making)}</div>
+  <p class='muted' style='margin-top:10px'>🎯 Target <b>{money(p['target'])}</b> (selling here for profit) &nbsp;·&nbsp;
+     🛡️ Safety net <b>{money(p['stop'])}</b> (auto-sells if it drops here)</p>
+  <div class='bar'><div class='fill' style='width:{prog}%'></div><div class='dot' style='left:{prog}%'></div></div>
+  <div class='row muted'><span>bought {money(p['paid'])}</span>
+     <span>{prog:.0f}% to target</span><span>target {money(p['target'])}</span></div>
+  <p style='margin-top:12px;font-weight:700'>Bot bought this because:</p>
+  {reasons}
+  <span class='pill'>Confidence score: {p['score']:.0f}/100</span>
+</div>""", unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# PAGE 2 — All Your Trades
+# --------------------------------------------------------------------------- #
+def page_trades(d):
+    trades = d["trades"]
+    total = sum(t["pnl"] for t in trades)
+    wins = [t for t in trades if t["win"]]
+    losses = [t for t in trades if not t["win"]]
+    wr = len(wins) / len(trades) * 100 if trades else 0
+    c1, c2, c3, c4 = st.columns(4)
+    _mini(c1, "💰 Total Made/Lost", signed(total), "all trades", color=col_for(total))
+    _mini(c2, "✅ Winning Trades", f"{len(wins)}", "made money")
+    _mini(c3, "❌ Losing Trades", f"{len(losses)}", "lost money")
+    _mini(c4, "📊 Win Rate", f"{wr:.0f}%", "of trades win")
+
+    if trades:
+        st.markdown(
+            f"<div class='card'><p style='font-size:15px'>Your bot has made <b>{len(trades)}</b> "
+            f"trades total. It won <b>{len(wins)}</b> and lost <b>{len(losses)}</b>. "
+            f"Even with some losses, the winners were big enough that you're "
+            f"<b style='color:{col_for(total)}'>{signed(total)}</b> overall. That's how the 4-to-1 "
+            f"strategy works — small losses, big wins.</p></div>", unsafe_allow_html=True)
+        for t in trades:
+            _trade_card(t)
+    else:
+        st.markdown("<div class='card'><div class='pos-title'>📭 No completed trades yet</div>"
+                    "<p class='muted'>Once the bot buys and sells something, it'll show up here "
+                    "with how much you made or lost.</p></div>", unsafe_allow_html=True)
+
+
+def _trade_card(t):
+    win = t["win"]
+    badge = (f"<span class='tag' style='background:#e7f9ee;color:{GREEN}'>✅ WIN</span>" if win
+             else f"<span class='tag' style='background:#fdeaec;color:{RED}'>❌ LOSS</span>")
+    res = "Profit" if win else "Loss"
+    note = f"<p class='muted'>Why it lost: {t['note']}</p>" if (not win and t.get("note")) else ""
+    bought = f"{t['bought_on']} at {money(t['bought_at']) if t['bought_at'] else '—'}"
+    sold = f"{t['sold_on']} at {money(t['sold_at']) if t['sold_at'] else '—'}"
+    st.markdown(f"""
+<div class='card'>
+  <div class='row'><div class='pos-title'>{t['emoji']} {t['name']} · Bought &amp; Sold</div>{badge}</div>
+  <p class='muted' style='margin:6px 0'>Bought {bought} &nbsp;·&nbsp; Sold {sold}
+     {('· held ' + str(t['days']) + ' days') if t['days'] else ''}</p>
+  <div style='font-size:20px;font-weight:800;color:{col_for(t['pnl'])}'>
+     {res}: {signed(t['pnl'])} ({t['pnl_pct']:+.1f}%) {dot(win)}</div>
+  {note}
+  {('<span class=pill>Bot confidence when bought: ' + str(int(t['score'])) + '/100</span>') if t.get('score') else ''}
+</div>""", unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# PAGE 3 — Watching Now
+# --------------------------------------------------------------------------- #
+def page_watching(d):
+    st.markdown("### 👁️ Markets your bot watches")
+    st.caption("🟢 Green = bot likes it · 🔴 Red = bot avoiding it · ⚪ Grey = neutral/waiting")
+    items = d["watching"]
+    flt = st.radio("filter", ["All", "Stocks", "Crypto", "Bot Likes (70+)", "Bot Owns"],
+                   horizontal=True, label_visibility="collapsed")
+    if flt == "Stocks":
+        items = [w for w in items if "/" not in w["symbol"]]
+    elif flt == "Crypto":
+        items = [w for w in items if "/" in w["symbol"]]
+    elif flt == "Bot Likes (70+)":
+        items = [w for w in items if w["score"] >= 70]
+    elif flt == "Bot Owns":
+        items = [w for w in items if w["status"] == "OWNED"]
+
+    if not items:
+        st.info("Nothing matches that filter right now.")
+        return
+    cols = st.columns(3)
+    for i, w in enumerate(items):
+        with cols[i % 3]:
+            _watch_card(w)
+
+
+def _watch_card(w):
+    view_emoji = {"BULLISH": "👍", "NEUTRAL": "😐", "BEARISH": "👎"}[w["view"]]
+    view_word = {"BULLISH": "Bot likes it", "NEUTRAL": "Bot waiting", "BEARISH": "Bot avoiding"}[w["view"]]
+    bar_col = GREEN if w["score"] >= 70 else (RED if w["score"] < 50 else GREY)
+    strength = "Strong" if w["score"] >= 70 else "Weak" if w["score"] < 50 else "Moderate"
+    status_map = {"OWNED": "✅ OWNED", "WATCHING": "👀 WATCHING", "AVOIDING": "🚫 AVOIDING"}
+    chg = w.get("chg", 0)
+    price = f"{money(w['price'])} {'▲' if chg>=0 else '▼'} {chg:+.1f}%" if w.get("price") else "live"
+    reasons = "".join(f"<div class='reason' style='font-size:13px'>• {r}</div>" for r in w["reasons"])
+    st.markdown(f"""
+<div class='card' style='min-height:230px'>
+  <div class='pos-title' style='font-size:17px'>{w['emoji']} {w['name']}</div>
+  <div class='muted' style='font-size:13px'>{w['symbol']} · {price}</div>
+  <div style='margin:8px 0;font-weight:800'>{view_emoji} {view_word}</div>
+  <div class='muted' style='font-size:13px'>Confidence: {w['score']:.0f}/100</div>
+  <div class='bar' style='height:8px'><div class='fill' style='width:{w["score"]}%;background:{bar_col}'></div></div>
+  <div class='muted' style='font-size:12px'>{strength}</div>
+  <div style='margin-top:8px'>{reasons}</div>
+  <div style='margin-top:8px;font-weight:700;font-size:13px'>{status_map[w['status']]}</div>
+</div>""", unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# PAGE 4 — How Is It Doing
+# --------------------------------------------------------------------------- #
+def page_performance(d):
+    st.markdown("### 📊 How is your bot doing?")
+    st.caption("The goal is a line that goes up and to the right.")
+    perf = d["performance"]
+    hist = d.get("equity_history", [])
+    if hist:
+        ys = [p["equity"] for p in hist]
+        base = ys[0]
+        fig = go.Figure(go.Scatter(y=ys, mode="lines", line=dict(color=GREEN, width=3)))
+        fig.add_hline(y=base, line_dash="dot", line_color=GREY,
+                      annotation_text="you started here", annotation_position="top left")
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0),
+                          yaxis_title="Your money", plot_bgcolor="#fff", paper_bgcolor="#fff")
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+    _explain("📈 How consistent is it?", f"Consistency score: {perf['sharpe']:.2f}",
+             "Above 1.0 means the bot makes more than it risks. Top funds aim for 2+. "
+             f"Yours is {perf['sharpe']:.2f} — " +
+             ("pretty good!" if perf["sharpe"] >= 1 else "still building a track record."))
+    _explain("📉 Worst rough patch", f"Biggest dip: {perf['max_drawdown_pct']:.2f}%",
+             "The most the bot ever dropped from a high point before recovering. Lower is better. "
+             f"That's about {money(perf['max_drawdown_dollar'], cents=False)} on a $100k account "
+             "at its worst, before bouncing back.")
+    _explain("🎯 Does the strategy make sense?",
+             f"Average win {signed(perf['avg_winner'])} · average loss {signed(perf['avg_loser'])}",
+             "When the bot wins it makes more than it loses when it's wrong — so even winning only "
+             "part of the time, you come out ahead. That's the whole idea behind 4-to-1.")
+
+    if perf["monthly"]:
+        st.markdown("#### This month, day by day")
+        cells = "".join(
+            f"<span style='display:inline-block;width:64px;text-align:center;margin:3px;"
+            f"padding:8px 0;border-radius:10px;font-size:12px;font-weight:700;"
+            f"background:{'#e7f9ee' if v>0 else ('#fdeaec' if v<0 else '#f4f6fa')};"
+            f"color:{GREEN if v>0 else (RED if v<0 else GREY)}'>"
+            f"{day}<br>{signed(v) if v else '$0'}</span>"
+            for day, v in perf["monthly"])
+        st.markdown(f"<div class='card'>{cells}</div>", unsafe_allow_html=True)
+
+
+def _explain(title, big, plain):
+    st.markdown(f"<div class='card'><div style='font-weight:800;font-size:16px'>{title}</div>"
+                f"<div style='font-size:18px;font-weight:700;margin:4px 0'>{big}</div>"
+                f"<div class='muted'>{plain}</div></div>", unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# PAGE 5 — Bot Status
+# --------------------------------------------------------------------------- #
+def page_bot(d):
+    b = d["bot"]
+    st.markdown(
+        f"<div class='card'><div class='pos-title'>🤖 Your Trading Bot</div>"
+        f"<div style='font-size:18px;font-weight:800;color:{GREEN if b['running'] else RED};margin:6px 0'>"
+        f"Status: {'🟢 RUNNING AND HEALTHY' if b['running'] else '🔴 STOPPED'}</div>"
+        f"<p class='muted'>Last checked markets: {b['last_scan_min']} min ago · "
+        f"next check: {b['next_scan_min']} min · running for {b['uptime']}</p>"
+        f"<p style='font-weight:700;margin-top:8px'>Today's activity</p>"
+        f"<div class='muted'>• Scanned markets {b['scans_today']} times<br>"
+        f"• Looked at {b['setups_looked']} potential setups<br>"
+        f"• Found {b['trades_taken']} trade(s) worth taking<br>"
+        f"• Rejected {b['setups_rejected']} (not good enough)</div></div>", unsafe_allow_html=True)
+
+    used, limit = b["daily_loss_used"], b["daily_loss_limit"]
+    pct = min(100, used / limit * 100) if limit else 0
+    st.markdown(
+        f"<div class='card'><div style='font-weight:800'>🛡️ Daily loss protection</div>"
+        f"<p class='muted'>Used {money(used, cents=False)} of {money(limit, cents=False)} allowed today</p>"
+        f"<div class='bar'><div class='fill' style='width:{max(2,pct):.0f}%;"
+        f"background:{GREEN if pct<70 else RED}'></div></div>"
+        f"<div class='muted'>{'✅ Safe zone' if pct<70 else '⚠️ Getting close'}</div>"
+        f"<p style='margin-top:10px'>📱 Phone alerts: {dot(b['telegram'])} &nbsp; "
+        f"🏦 Broker: {dot(b['broker'])} &nbsp; 💾 Saving trades: {dot(b['logging'])}</p></div>",
+        unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    if b["running"]:
+        if c1.button("⛔ STOP ALL TRADING", type="primary", width="stretch"):
+            get_store().request_halt("manual STOP from dashboard")
+            st.success("Stop requested — the bot will close everything on its next check.")
+    else:
+        if c1.button("▶️ RESUME TRADING", width="stretch"):
+            get_store().clear_halt()
+            st.success("Resume requested.")
+
+    st.markdown(
+        f"<div class='card'><div style='font-weight:800'>⚙️ How picky is your bot?</div>"
+        f"<p class='muted' style='margin-top:8px'>Minimum confidence to trade: "
+        f"<b>{b['min_score']:.0f}/100</b> — only trades when it's at least that sure.</p>"
+        f"<p class='muted'>Minimum profit potential: <b>{b['rr']:.0f}-to-1</b> — must see "
+        f"${b['rr']:.0f} of potential for every $1 risked.</p>"
+        f"<p class='muted'>Max risk per trade: <b>{b['risk_pct']:.0f}%</b> of the account — "
+        f"never risks more than {money(d['started']*b['risk_pct']/100, cents=False)} on one trade.</p></div>",
+        unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+PAGES = {"💰 Home": page_home, "📋 Trades": page_trades, "👁️ Watching": page_watching,
+         "📊 Performance": page_performance, "🤖 Bot": page_bot}
+
+
+def _nav():
+    try:
+        from streamlit_option_menu import option_menu
+        return option_menu(None, list(PAGES.keys()), orientation="horizontal",
+                           icons=[""] * len(PAGES),
+                           styles={"container": {"padding": "4px", "background-color": "#f4f6fa"},
+                                   "nav-link-selected": {"background-color": "#0E1117"}})
+    except Exception:
+        return st.radio("nav", list(PAGES.keys()), horizontal=True, label_visibility="collapsed")
+
+
+def main():
+    try:
+        d, mode, default = load_data()
+    except Exception:
+        st.error("😅 Couldn't load your data right now. Try the Refresh button in a moment.")
+        return
+
+    top_bar(d, mode)
+    page = st.session_state.get("force_page") or _nav() or list(PAGES.keys())[0]
+
+    # Controls row: refresh + data mode toggle.
+    cc1, cc2, cc3 = st.columns([1, 1, 3])
+    if cc1.button("🔄 Refresh"):
+        st.rerun()
+    new_mode = cc2.selectbox("Data", ["Demo", "Live"],
+                             index=0 if mode == "Demo" else 1, label_visibility="collapsed")
+    if new_mode != mode:
+        st.session_state["data_mode"] = new_mode
+        st.rerun()
+
+    try:
+        PAGES[page](d)
+    except Exception:
+        st.error("😅 Something hiccuped showing this page. Hit Refresh — your money and bot "
+                 "are safe; this is just the display.")
 
     st.divider()
-    st.subheader("Symbol deep-dive")
-    sym = st.selectbox("Symbol", settings.load_watchlist())
-    if st.button("Analyze", width="stretch"):
-        with st.spinner(f"Analyzing {sym}…"):
-            _analyze_symbol(sym)
-
-
-def _analyze_symbol(sym):
-    from src.data.feed import MarketFeed
-    from src.signals.regime import RegimeDetector
-    from src.signals.technical import TechnicalAnalysis
-    feed = MarketFeed(settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY,
-                      stock_feed=settings.STOCK_DATA_FEED)
-    df = feed.get_bars(sym, "1Day", settings.LOOKBACK_BARS)
-    if df.empty:
-        st.error("No data."); return
-    tech = TechnicalAnalysis().analyze(df)
-    regime = RegimeDetector().detect(df)
-    if tech is None:
-        st.error("Analysis failed."); return
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Price", f"${tech.values.get('price', 0):,.2f}")
-    arrow = "↑" if tech.trend_bias == "long" else "↓" if tech.trend_bias == "short" else "→"
-    c2.metric("Trend bias", f"{arrow} {tech.trend_bias}")
-    c3.metric("Regime", regime.strategy)
-    st.markdown(f"**Regime label:** `{regime.label}`")
-    firing = [k for k, v in tech.signals.items() if v is True][:3]
-    st.markdown("**Top signals firing:** " + (", ".join(firing) if firing else "none"))
-    with st.expander("Full indicator values"):
-        st.json({k: round(v, 4) if isinstance(v, float) else v
-                 for k, v in tech.values.items()})
-
-
-def page_performance(state):
-    st.header("Performance")
-    df = _equity_df(state)
-    if df.empty:
-        st.info("Performance metrics accumulate as the agent runs (equity history).")
-        return
-    df = df.set_index("t")
-    fig = go.Figure(go.Scatter(x=df.index, y=df["equity"], mode="lines"))
-    fig.update_layout(title="Equity curve (since agent start)", height=360)
-    st.plotly_chart(fig, width="stretch")
-
-    # Drawdown
-    peak = df["equity"].cummax()
-    dd = (df["equity"] - peak) / peak * 100
-    ddfig = go.Figure(go.Scatter(x=df.index, y=dd, fill="tozeroy", line=dict(color="#d62728")))
-    ddfig.update_layout(title="Drawdown (%)", height=260)
-    st.plotly_chart(ddfig, width="stretch")
-
-    closed = pd.DataFrame(state.get("closed_today", []))
-    c1, c2, c3 = st.columns(3)
-    if not closed.empty and "pnl" in closed:
-        wins = (closed["pnl"] > 0).sum()
-        c1.metric("Win rate (today)", f"{wins/len(closed)*100:.0f}%")
-        c2.metric("Best trade", f"${closed['pnl'].max():,.2f}")
-        c3.metric("Worst trade", f"${closed['pnl'].min():,.2f}")
-    c1.metric("Max drawdown", f"{dd.min():.2f}%")
-    st.caption("Note: deeper metrics (Sharpe/Sortino, monthly heatmap) populate from "
-               "live history; for rigorous stats use the validation harness on backtests.")
-
-
-def page_backtest():
-    st.header("Backtest")
-    c1, c2, c3 = st.columns(3)
-    sym = c1.selectbox("Symbol", settings.load_watchlist())
-    period = c2.selectbox("Period", ["1y", "2y", "5y"], index=1)
-    min_score = c3.slider("Min score", 50, 90, 70, 5)
-    if st.button("Run backtest", type="primary"):
-        with st.spinner(f"Backtesting {sym} ({period})…"):
-            from src.backtest.engine import Backtester
-            r = Backtester().run_pipeline(sym, period=period, interval="1d", min_score=min_score)
-        if r is None:
-            st.error("Not enough data / no result.")
-            return
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Trades", r.num_trades)
-        m2.metric("Return", f"{r.total_return*100:.2f}%")
-        m3.metric("Sharpe", f"{r.sharpe:.2f}")
-        m4.metric("Max DD", f"{r.max_drawdown*100:.2f}%")
-        if r.equity_curve is not None and len(r.equity_curve):
-            fig = go.Figure(go.Scatter(x=r.equity_curve.index, y=r.equity_curve.values, mode="lines"))
-            fig.update_layout(title=f"{sym} equity curve", height=360)
-            st.plotly_chart(fig, width="stretch")
-        if r.trades is not None and not r.trades.empty:
-            st.dataframe(r.trades, width="stretch")
-
-
-# --------------------------------------------------------------------------- #
-# Layout
-# --------------------------------------------------------------------------- #
-def main():
-    store = get_store()
-    state = store.read_state()
-
-    st.sidebar.title("📈 Trading Agent")
-    fresh = store.is_fresh(max_age_seconds=180)
-    st.sidebar.markdown(("🟢 Agent live" if fresh else "⚪ Agent idle/offline"))
-    page = st.sidebar.radio("Page", ["Live Overview", "Positions", "Signal Scanner",
-                                     "Performance", "Backtest"])
-    st.sidebar.caption(f"Mode: {'PAPER' if settings.PAPER else 'LIVE'}")
-
-    if page == "Live Overview":
-        page_overview(state)
-    elif page == "Positions":
-        page_positions(state)
-    elif page == "Signal Scanner":
-        page_scanner(state)
-    elif page == "Performance":
-        page_performance(state)
-    elif page == "Backtest":
-        page_backtest()
-
-    # Auto-refresh only the live pages (not while running a backtest/analysis).
-    if page in ("Live Overview", "Positions", "Signal Scanner"):
-        time.sleep(REFRESH_SECONDS)
-        st.rerun()
+    friendly_glossary()
+    st.caption("This is a paper-trading bot for learning. Not financial advice.")
 
 
 main()
