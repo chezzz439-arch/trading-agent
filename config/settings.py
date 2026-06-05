@@ -27,9 +27,13 @@ STOCK_DATA_FEED: str = os.getenv("ALPACA_DATA_FEED", "iex")
 # --------------------------------------------------------------------------- #
 # Universe
 # --------------------------------------------------------------------------- #
-WATCHLIST: list[str] = ["AAPL", "TSLA", "SPY", "NVDA", "BTC/USD", "ETH/USD"]
+WATCHLIST: list[str] = [
+    "AAPL", "TSLA", "NVDA", "SPY", "QQQ", "MSFT", "AMZN", "META", "GOOGL", "AMD",
+    "BTC/USD", "ETH/USD", "SOL/USD",
+]
 # Symbols containing "/" are routed to the crypto data/execution paths.
-CRYPTO_SYMBOLS: set[str] = {"BTC/USD", "ETH/USD"}
+CRYPTO_SYMBOLS: set[str] = {"BTC/USD", "ETH/USD", "SOL/USD"}
+MARKET_PROXY: str = "SPY"          # beta/market reference
 
 # --------------------------------------------------------------------------- #
 # Strategy (EMA crossover + RSI confirmation)
@@ -46,7 +50,7 @@ RSI_SHORT_THRESHOLD: float = 50.0  # short requires RSI below this
 RR_RATIO: float = 5.0              # minimum acceptable reward:risk
 ATR_PERIOD: int = 14
 ATR_MULTIPLIER: float = 1.5        # stop distance = ATR * multiplier
-SWING_LOOKBACK: int = 20           # bars scanned for swing high/low target
+SWING_LOOKBACK: int = 100          # bars scanned for structural path veto
 
 # --------------------------------------------------------------------------- #
 # Per-trade risk / position sizing
@@ -58,14 +62,25 @@ MAX_POSITION_PCT: float = 0.10     # cap a single position at 10% of equity
 # Portfolio risk
 # --------------------------------------------------------------------------- #
 MAX_CONCURRENT_POSITIONS: int = 3
-DAILY_LOSS_LIMIT: float = 0.03     # kill switch at -3% from day-start equity
-MAX_CORRELATION: float = 0.80      # block new position too correlated to held
+DAILY_LOSS_LIMIT: float = 0.03      # kill switch at -3% from day-start equity
+WEEKLY_LOSS_LIMIT: float = 0.07     # kill switch at -7% from week-start equity
+MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
+MAX_CORRELATION: float = 0.70       # block new position too correlated to held
+PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
+
+# --------------------------------------------------------------------------- #
+# Master scorer / ML
+# --------------------------------------------------------------------------- #
+MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade
+ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
+ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
 
 # --------------------------------------------------------------------------- #
 # Timeframes
 # --------------------------------------------------------------------------- #
 SIGNAL_TIMEFRAME: str = "1Hour"            # timeframe entries are taken on
-MTF_TIMEFRAMES: tuple[str, str] = ("1Hour", "4Hour")  # must agree on direction
+MTF_TIMEFRAMES: tuple[str, ...] = ("15Min", "1Hour", "4Hour", "1Day", "1Week")
+MIN_CONFLUENCE: int = 3                     # timeframes that must agree
 LOOKBACK_BARS: int = 300                   # bars pulled per request
 
 # --------------------------------------------------------------------------- #

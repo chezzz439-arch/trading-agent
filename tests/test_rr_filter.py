@@ -23,10 +23,19 @@ def make_df(highs, lows, closes) -> pd.DataFrame:
     )
 
 
-def constant_range_df(n: int = 60, high: float = 101.0, low: float = 99.0,
+def constant_range_df(n: int = 130, high: float = 101.0, low: float = 99.0,
                       close: float = 100.0) -> pd.DataFrame:
     """Every bar has the same range, so ATR == (high - low) exactly."""
     return make_df([high] * n, [low] * n, [close] * n)
+
+
+def clean_long_df(n: int = 130) -> pd.DataFrame:
+    """Bars whose highs sit below the (entry=100) signal — a blue-sky breakout.
+
+    Constant 1.0 range => ATR == 1.0, so stop distance = 1.5 and the constructed
+    5:1 target sits at 100 + 5 * 1.5 = 107.5.
+    """
+    return make_df([99.5] * n, [98.5] * n, [99.0] * n)
 
 
 def long_signal(df: pd.DataFrame, entry: float = 100.0) -> Signal:
@@ -52,40 +61,55 @@ def test_atr_is_positive_and_finite():
 
 
 # --------------------------------------------------------------------------- #
-# RR filter
+# RR filter — constructed target + structural path veto
 # --------------------------------------------------------------------------- #
-def test_valid_5to1_setup_passes():
-    # Base range -> ATR 2 -> stop distance 1.5*2 = 3 -> risk 3 per share.
-    # Place a far swing high (200) inside the lookback window so the structural
-    # target gives reward >> 5 * risk.
-    df = constant_range_df()
-    df.iloc[-4, df.columns.get_loc("high")] = 200.0  # swing-high target
-
-    plan = RRFilter(rr_ratio=5.0, atr_multiplier=1.5, swing_lookback=20).evaluate(
-        long_signal(df), df
-    )
+def test_constructed_target_is_exactly_5to1():
+    # Blue-sky breakout: ATR 1.0 -> stop 98.5, target 100 + 5*1.5 = 107.5.
+    df = clean_long_df()
+    plan = RRFilter(rr_ratio=5.0, atr_multiplier=1.5).evaluate(long_signal(df), df)
     assert plan is not None
-    assert plan.rr >= 5.0
+    assert plan.rr == pytest.approx(5.0, abs=1e-6)
     assert plan.stop < plan.entry < plan.target
+    assert plan.stop == pytest.approx(98.5, abs=1e-6)
+    assert plan.target == pytest.approx(107.5, abs=1e-6)
 
 
-def test_3to1_setup_gets_rejected():
-    # Same base ATR ~2 (risk ~3), but the only swing high is at ~109, giving a
-    # reward of ~9 -> roughly 3:1, which is below the 5:1 minimum.
-    df = constant_range_df()
-    df.iloc[-4, df.columns.get_loc("high")] = 109.0
+def test_resistance_in_path_is_rejected():
+    # Park a swing high (103) between entry (100) and the ~107.5 target: the
+    # structural veto should block the trade.
+    df = clean_long_df()
+    resistance = 103.0
+    df.iloc[60, df.columns.get_loc("high")] = resistance
 
-    plan = RRFilter(rr_ratio=5.0, atr_multiplier=1.5, swing_lookback=20).evaluate(
-        long_signal(df), df
-    )
+    a = float(atr(df, 14).iloc[-1])
+    target = 100.0 + 5.0 * 1.5 * a
+    assert 100.0 < resistance < target  # precondition: resistance sits in path
+
+    plan = RRFilter(rr_ratio=5.0, atr_multiplier=1.5).evaluate(long_signal(df), df)
     assert plan is None
 
 
-def test_no_structure_above_price_rejected():
-    # Highest high is below entry -> no valid long target -> reject.
-    df = constant_range_df(high=99.5, low=98.0, close=99.0)
+def test_resistance_beyond_target_passes():
+    # A swing high well above the target is not "in the path" — trade allowed.
+    df = clean_long_df()
+    resistance = 130.0
+    df.iloc[40, df.columns.get_loc("high")] = resistance
+
+    a = float(atr(df, 14).iloc[-1])
+    target = 100.0 + 5.0 * 1.5 * a
+    assert resistance >= target  # precondition: resistance is beyond the target
+
+    plan = RRFilter(rr_ratio=5.0, atr_multiplier=1.5).evaluate(long_signal(df), df)
+    assert plan is not None
+    # rr is computed from penny-rounded levels, so allow minor rounding drift.
+    assert plan.rr == pytest.approx(5.0, abs=0.1)
+
+
+def test_blue_sky_breakout_passes():
+    # No overhead resistance at all (all highs below entry) -> clear path.
+    df = clean_long_df()
     plan = RRFilter().evaluate(long_signal(df, entry=100.0), df)
-    assert plan is None
+    assert plan is not None
 
 
 # --------------------------------------------------------------------------- #

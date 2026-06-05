@@ -140,8 +140,125 @@ class Backtester:
             curve_idx.append(df.index[i])
             curve_val.append(mtm)
 
+        # Liquidate any still-open position at the final close so the trade
+        # log, win rate and total return stay consistent (no unrealized P&L
+        # silently leaking into the equity curve as an "untraded" gain).
+        if position is not None:
+            last_close = float(df["close"].iloc[-1])
+            pnl = self._pnl(position, last_close)
+            equity += pnl
+            r_multiple = (pnl / position["qty"]) / position["risk_per_share"]
+            trades.append({
+                "entry_time": position["entry_time"],
+                "exit_time": df.index[-1],
+                "side": position["side"],
+                "entry": position["entry"],
+                "exit": last_close,
+                "qty": position["qty"],
+                "pnl": pnl,
+                "r_multiple": r_multiple,
+                "outcome": "win" if pnl > 0 else "loss",
+                "forced_exit": True,
+            })
+
         equity_curve = pd.Series(curve_val, index=curve_idx, name="equity")
         return self._metrics(symbol, equity_curve, trades, interval)
+
+    # ------------------------------------------------------------------ #
+    # Full-pipeline backtest (scorer-gated). ML / MTF / sentiment are
+    # live-only inputs and score neutral here — see module docstring.
+    # ------------------------------------------------------------------ #
+    def run_pipeline(self, symbol: str, market_symbol: str = "SPY",
+                     period: str = "2y", interval: str = "1d",
+                     min_score: float = 70.0, warmup: int = 210):
+        from src.risk.portfolio_risk import PortfolioRisk
+        from src.risk.position_sizer import PositionSizer
+        from src.signals.quant import QuantAnalysis
+        from src.signals.regime import RegimeDetector
+        from src.signals.scorer import MasterScorer
+        from src.signals.strategy import Signal
+        from src.signals.technical import TechnicalAnalysis
+
+        df = self.load_data(symbol, period, interval)
+        market = self.load_data(market_symbol, period, interval)
+        if df.empty or len(df) < warmup + 5:
+            logger.warning("Not enough data to pipeline-backtest %s", symbol)
+            return None
+
+        tech_a, quant_a = TechnicalAnalysis(), QuantAnalysis()
+        regime_d, scorer = RegimeDetector(), MasterScorer(min_score=min_score)
+        risk = PortfolioRisk(min_score=min_score)
+        fractional = is_crypto(symbol)
+
+        equity = self.initial_capital
+        position = None
+        trades: list[dict] = []
+        curve_idx, curve_val = [], []
+
+        for i in range(warmup, len(df)):
+            window = df.iloc[: i + 1]
+            bar = df.iloc[i]
+            if position is not None:
+                exit_price, outcome = self._check_exit(position, bar)
+                if exit_price is not None:
+                    pnl = self._pnl(position, exit_price)
+                    equity += pnl
+                    trades.append(self._trade_record(position, df.index[i], exit_price,
+                                                     pnl, outcome))
+                    position = None
+            if position is None:
+                position = self._pipeline_enter(symbol, window, market, equity, fractional,
+                                                df.index[i], tech_a, quant_a, regime_d,
+                                                scorer, risk)
+            mtm = equity + (self._pnl(position, bar["close"]) if position else 0.0)
+            curve_idx.append(df.index[i]); curve_val.append(mtm)
+
+        if position is not None:
+            last_close = float(df["close"].iloc[-1])
+            pnl = self._pnl(position, last_close)
+            equity += pnl
+            trades.append(self._trade_record(position, df.index[-1], last_close, pnl,
+                                             "win" if pnl > 0 else "loss", forced=True))
+
+        equity_curve = pd.Series(curve_val, index=curve_idx, name="equity")
+        return self._metrics(symbol, equity_curve, trades, interval)
+
+    def _pipeline_enter(self, symbol, window, market, equity, fractional, ts,
+                        tech_a, quant_a, regime_d, scorer, risk):
+        from src.risk.position_sizer import PositionSizer
+        from src.signals.strategy import Signal
+
+        tech = tech_a.analyze(window)
+        if tech is None or tech.trend_bias == "neutral":
+            return None
+        side = tech.trend_bias
+        mkt = market.loc[:window.index[-1]] if not market.empty else None
+        quant = quant_a.analyze(window, market_df=mkt)
+        regime = regime_d.detect(window, vix=None, spy_df=mkt)
+        sig = Signal(symbol, side, float(window["close"].iloc[-1]),
+                     tech.values.get("rsi14") or 50.0, ts, side)
+        plan = self.rr_filter.evaluate(sig, window)
+        score = scorer.score(symbol, side, technical=tech, quant=quant, regime=regime,
+                             ml=None, mtf=None, plan=plan)
+        if not score.passed or plan is None:
+            return None
+        fraction = risk.risk_fraction_for_score(score.total)
+        sized = PositionSizer(fraction).size(plan, equity, fractional=fractional)
+        if sized is None:
+            return None
+        return {"side": plan.side, "entry": plan.entry, "stop": plan.stop,
+                "target": plan.target, "qty": sized.qty,
+                "risk_per_share": plan.risk_per_share, "entry_time": ts,
+                "score": score.total}
+
+    def _trade_record(self, position, exit_time, exit_price, pnl, outcome, forced=False):
+        return {
+            "entry_time": position["entry_time"], "exit_time": exit_time,
+            "side": position["side"], "entry": position["entry"], "exit": exit_price,
+            "qty": position["qty"], "pnl": pnl,
+            "r_multiple": (pnl / position["qty"]) / position["risk_per_share"],
+            "outcome": outcome, "score": position.get("score"), "forced_exit": forced,
+        }
 
     def _maybe_enter(self, symbol, window, equity, fractional, ts):
         from src.risk.position_sizer import PositionSizer

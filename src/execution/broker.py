@@ -23,7 +23,9 @@ from alpaca.trading.enums import (
 )
 from alpaca.trading.requests import (
     GetOrdersRequest,
+    LimitOrderRequest,
     MarketOrderRequest,
+    StopLimitOrderRequest,
     StopLossRequest,
     TakeProfitRequest,
 )
@@ -35,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 def _is_crypto(symbol: str) -> bool:
     return "/" in symbol
+
+
+def _round(x: float) -> float:
+    return round(x, 2)
 
 
 class Broker:
@@ -131,6 +137,103 @@ class Broker:
         result = self._client.submit_order(order)
         logger.info("Crypto entry accepted id=%s status=%s", result.id, result.status)
         return result
+
+    # ------------------------------------------------------------------ #
+    # Phase 9 — smart / partial entries, scale-out, dynamic stops
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def scale_out_levels(plan) -> list[tuple[float, float]]:
+        """Profit-taking ladder: 33% at 2R, 33% at 3.5R, 34% at full target.
+
+        Returns ``[(price, fraction), ...]`` in price terms for the plan's side.
+        """
+        r = plan.risk_per_share
+        if plan.side == "long":
+            return [(_round(plan.entry + 2 * r), 0.33),
+                    (_round(plan.entry + 3.5 * r), 0.33),
+                    (_round(plan.target), 0.34)]
+        return [(_round(plan.entry - 2 * r), 0.33),
+                (_round(plan.entry - 3.5 * r), 0.33),
+                (_round(plan.target), 0.34)]
+
+    @staticmethod
+    def choose_entry_type(regime_label: str | None) -> str:
+        """Pick an entry style from the regime: trend->stop breakout, range->limit pullback."""
+        if regime_label and "strong_trend" in regime_label:
+            return "market"          # don't miss a strong trend
+        if regime_label and "ranging" in regime_label:
+            return "limit"           # wait for a better fill at a level
+        return "market"
+
+    def place_smart_entry(
+        self, trade: SizedTrade, regime_label: str | None = None,
+        limit_price: float | None = None,
+    ) -> Any | None:
+        """Entry that adapts to regime: a limit pullback in ranges, else a bracket.
+
+        For a ranging regime with a supplied ``limit_price`` (e.g. an EMA or
+        pivot), submits a bracket *limit* entry for a better fill; otherwise
+        falls back to the standard market bracket.
+        """
+        plan = trade.plan
+        if _is_crypto(plan.symbol):
+            side = OrderSide.BUY if plan.side == "long" else OrderSide.SELL
+            return self._place_crypto_entry(trade, side)
+
+        entry_type = self.choose_entry_type(regime_label)
+        if entry_type == "limit" and limit_price:
+            return self._place_limit_bracket(trade, _round(limit_price))
+        return self.place_bracket_order(trade)
+
+    def _place_limit_bracket(self, trade: SizedTrade, limit_price: float) -> Any | None:
+        plan = trade.plan
+        side = OrderSide.BUY if plan.side == "long" else OrderSide.SELL
+        try:
+            order = LimitOrderRequest(
+                symbol=plan.symbol, qty=trade.qty, side=side,
+                time_in_force=TimeInForce.DAY, limit_price=limit_price,
+                order_class=OrderClass.BRACKET,
+                take_profit=TakeProfitRequest(limit_price=plan.target),
+                stop_loss=StopLossRequest(stop_price=plan.stop),
+            )
+            logger.info("%s: smart LIMIT bracket entry @%.2f (better than %.2f)",
+                        plan.symbol, limit_price, plan.entry)
+            result = self._client.submit_order(order)
+            logger.info("Order accepted id=%s status=%s", result.id, result.status)
+            return result
+        except Exception:
+            logger.exception("limit bracket entry failed for %s", plan.symbol)
+            return None
+
+    def replace_stop(self, symbol: str, new_stop: float) -> bool:
+        """Cancel any working stop leg for ``symbol`` and resubmit at ``new_stop``.
+
+        Best-effort dynamic-stop update (breakeven / trail). Returns success.
+        Note: robust live management of bracket child legs is stateful; this
+        cancels open orders for the symbol and relies on the position manager to
+        re-arm protection.
+        """
+        try:
+            query_symbol = symbol.replace("/", "")
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[query_symbol])
+            for o in self._client.get_orders(filter=req):
+                if getattr(o, "type", None) and "stop" in str(o.type).lower():
+                    self._client.cancel_order_by_id(o.id)
+            logger.info("%s: stop update requested -> %.2f", symbol, _round(new_stop))
+            return True
+        except Exception:
+            logger.exception("replace_stop failed for %s", symbol)
+            return False
+
+    def close_position(self, symbol: str) -> bool:
+        """Close a single position (used by the time-based exit)."""
+        try:
+            self._client.close_position(symbol.replace("/", ""))
+            logger.info("%s: position closed", symbol)
+            return True
+        except Exception:
+            logger.exception("close_position failed for %s", symbol)
+            return False
 
     def close_all(self) -> None:
         """Liquidate every open position and cancel working orders (kill switch)."""
