@@ -57,6 +57,9 @@ class Broker:
     def get_equity(self) -> float:
         return float(self.get_account().equity)
 
+    def get_buying_power(self) -> float:
+        return float(self.get_account().buying_power)
+
     def get_positions(self) -> list[Any]:
         try:
             return self._client.get_all_positions()

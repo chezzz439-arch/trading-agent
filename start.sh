@@ -55,7 +55,9 @@ ok "Telegram step done"
 # 5) start agent ---------------------------------------------------------------
 step "5/7" "Starting agent (background)"
 if pgrep -f "python main.py" >/dev/null; then fail "agent already running (use ./stop.sh first)"; fi
-nohup python main.py >> "$LOG" 2>&1 &
+# Redirect to a separate console log; main.py's FileHandler already writes $LOG
+# (redirecting here too would duplicate every line).
+nohup python main.py >> "logs/agent_console_${DATE}.log" 2>&1 &
 echo $! > .agent.pid
 sleep 2
 kill -0 "$(cat .agent.pid)" 2>/dev/null && ok "agent PID $(cat .agent.pid) → $LOG" || fail "agent died on startup (see $LOG)"

@@ -71,7 +71,7 @@ PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade
+MIN_SCORE: float = 60.0            # minimum 0-100 score required to trade (demo: lowered from 70)
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
 
