@@ -139,7 +139,7 @@ def page_scanner(state):
 
     st.divider()
     st.subheader("Symbol deep-dive")
-    sym = st.selectbox("Symbol", settings.WATCHLIST)
+    sym = st.selectbox("Symbol", settings.load_watchlist())
     if st.button("Analyze", use_container_width=True):
         with st.spinner(f"Analyzing {sym}…"):
             _analyze_symbol(sym)
@@ -204,7 +204,7 @@ def page_performance(state):
 def page_backtest():
     st.header("Backtest")
     c1, c2, c3 = st.columns(3)
-    sym = c1.selectbox("Symbol", settings.WATCHLIST)
+    sym = c1.selectbox("Symbol", settings.load_watchlist())
     period = c2.selectbox("Period", ["1y", "2y", "5y"], index=1)
     min_score = c3.slider("Min score", 50, 90, 70, 5)
     if st.button("Run backtest", type="primary"):

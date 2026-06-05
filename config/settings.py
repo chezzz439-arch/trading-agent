@@ -102,6 +102,28 @@ TIME_EXIT_BARS: int = 10           # close a stalled position after N bars...
 TIME_EXIT_MIN_R: float = 1.0       # ...if it hasn't reached this R by then
 
 # --------------------------------------------------------------------------- #
+# Universe screen (per-symbol eligibility gate before analysis)
+# --------------------------------------------------------------------------- #
+SCREEN_MIN_PRICE: float = 15.0        # no low-priced names
+SCREEN_MIN_MARKET_CAP: float = 3e9    # large/mid-cap only
+SCREEN_MIN_AVG_VOLUME: float = 1e6    # liquidity floor (shares/day)
+WATCHLIST_PATH: str = os.path.join("config", "watchlist.json")
+
+
+def load_watchlist() -> list[str]:
+    """Screened watchlist from config/watchlist.json, else the static WATCHLIST."""
+    import json
+    try:
+        with open(WATCHLIST_PATH) as f:
+            syms = json.load(f).get("symbols", [])
+        if syms:
+            return syms
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return WATCHLIST
+
+
+# --------------------------------------------------------------------------- #
 # Monitoring
 # --------------------------------------------------------------------------- #
 STREAMLIT_AUTOSTART: bool = True   # launch the Streamlit dashboard from main.py

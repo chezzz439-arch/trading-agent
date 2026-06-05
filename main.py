@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from config import settings
 from src.data.feed import MarketFeed, is_crypto
+from src.data.screener import ScreenCriteria, UniverseScreener
 from src.execution.broker import Broker
 from src.monitoring.dashboard import Dashboard, DashboardState
 from src.risk.portfolio_risk import PortfolioRisk
@@ -87,6 +88,12 @@ class TradingAgent:
         )
         self.broker = Broker(k, s, paper=settings.PAPER)
         self.dashboard = Dashboard(log_dir=settings.LOG_DIR)
+        # Dynamic watchlist (screened) + per-symbol eligibility gate.
+        self.watchlist = settings.load_watchlist()
+        self.screener = UniverseScreener(ScreenCriteria(
+            min_price=settings.SCREEN_MIN_PRICE,
+            min_market_cap=settings.SCREEN_MIN_MARKET_CAP,
+            min_avg_volume=settings.SCREEN_MIN_AVG_VOLUME))
         # Monitoring layers (Layer 1 Streamlit reads state file; Layer 2 Telegram;
         # Layer 3 terminal dash reads state file).
         self.state_store = StateStore(log_dir=settings.LOG_DIR)
@@ -145,7 +152,7 @@ class TradingAgent:
         self._start_streamlit()
         self.notifier.startup(mode, eq)
         logger.info("Agent started | mode=%s | %d symbols | interval=%ds | min_score=%.0f",
-                    mode, len(settings.WATCHLIST), settings.SCAN_INTERVAL, settings.MIN_SCORE)
+                    mode, len(self.watchlist), settings.SCAN_INTERVAL, settings.MIN_SCORE)
         consecutive_errors = 0
         while self._running:
             try:
@@ -231,7 +238,7 @@ class TradingAgent:
         held_closes = self._held_closes(open_symbols)
 
         scores_for_dash = []
-        for symbol in settings.WATCHLIST:
+        for symbol in self.watchlist:
             try:
                 result = self._evaluate(symbol, equity, open_symbols, held_closes,
                                         sentiment, spy_df)
@@ -253,6 +260,12 @@ class TradingAgent:
 
         df = self.feed.get_bars(symbol, "1Day", settings.LOOKBACK_BARS)
         if df.empty or len(df) < 60:
+            return None
+
+        # ---- Universe screen: skip ineligible names before analysis ----- #
+        eligible, reason = self.screener.passes(symbol, df)
+        if not eligible:
+            logger.info("%s: screened out — %s", symbol, reason)
             return None
 
         # ---- Phase 1: technical -> candidate direction ------------------ #
@@ -519,7 +532,7 @@ class TradingAgent:
         if now_et.hour == 9 and self._sent.get("health") != today:
             self.notifier.system_health(
                 regime=sentiment.risk_state if sentiment else "unknown",
-                watchlist_n=len(settings.WATCHLIST), equity=equity)
+                watchlist_n=len(self.watchlist), equity=equity)
             self._sent["health"] = today
 
         if now_et.hour >= 16 and now_et.weekday() < 5 and self._sent.get("daily") != today:

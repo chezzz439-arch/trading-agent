@@ -51,7 +51,7 @@ def fetch_futures() -> dict:
 def premarket_movers() -> list:
     import yfinance as yf
     moves = []
-    for sym in settings.WATCHLIST:
+    for sym in settings.load_watchlist():
         ticker = sym.replace("/", "-")
         try:
             h = yf.download(ticker, period="2d", interval="1d", progress=False,
@@ -135,7 +135,7 @@ def main() -> None:
     vix, vix_trend = fetch_vix()
     futures = fetch_futures()
     movers = premarket_movers()
-    scored = sorted([score_symbol(s, feed, spy_df) for s in settings.WATCHLIST],
+    scored = sorted([score_symbol(s, feed, spy_df) for s in settings.load_watchlist()],
                     key=lambda t: t[1], reverse=True)
 
     top3 = [s for s in scored if s[1] > 0][:3]
