@@ -48,17 +48,6 @@ def fetch_futures() -> dict:
     return out
 
 
-def fetch_vix() -> tuple:
-    import yfinance as yf
-    try:
-        h = yf.download("^VIX", period="1mo", interval="1d", progress=False)["Close"].dropna()
-        level = float(h.iloc[-1])
-        trend = "rising" if h.iloc[-1] > h.iloc[-5] else "falling"
-        return level, trend
-    except Exception:
-        return None, "unknown"
-
-
 def premarket_movers() -> list:
     import yfinance as yf
     moves = []
@@ -118,9 +107,15 @@ def score_symbol(sym: str, feed, spy_df) -> tuple:
 
 
 def recommended_size(vix, regime_vol) -> str:
-    if vix is not None and vix > 28 or regime_vol == "extreme":
+    """Size by VIX when available, else by the regime's ATR-percentile volatility."""
+    high = (vix is not None and vix > 28) or regime_vol == "extreme"
+    elevated = (vix is not None and 22 <= vix <= 28) or regime_vol == "high"
+    calm = (vix is not None and vix < 15) or (vix is None and regime_vol == "low")
+    if high:
         return "0.5% per trade (high volatility — size down)"
-    if vix is not None and vix < 15 and regime_vol in ("low", "medium"):
+    if elevated:
+        return "0.75% per trade (elevated volatility)"
+    if calm:
         return "up to 1.5% per trade (calm tape)"
     return "1% per trade (normal)"
 
@@ -128,6 +123,7 @@ def recommended_size(vix, regime_vol) -> str:
 def main() -> None:
     from src.data.feed import MarketFeed
     from src.signals.regime import RegimeDetector
+    from src.signals.sentiment import fetch_vix
     from src.monitoring.telegram_bot import TelegramNotifier
 
     feed = MarketFeed(settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY,
@@ -149,7 +145,11 @@ def main() -> None:
     # --- Build briefing ---------------------------------------------------- #
     lines = [f"MORNING BRIEFING — {datetime.now(timezone.utc):%Y-%m-%d}", ""]
     lines.append(f"Market regime: {reg_label}")
-    lines.append(f"VIX: {vix:.1f} ({vix_trend})" if vix else "VIX: n/a")
+    if vix is not None:
+        lines.append(f"VIX: {vix:.1f} ({vix_trend})")
+    else:
+        lines.append(f"VIX: unavailable — using volatility regime '{reg_vol}' "
+                     f"(ATR percentile)")
     if futures:
         lines.append("Futures: " + ", ".join(f"{k} {v:+.2f}%" for k, v in futures.items()))
     lines.append("")

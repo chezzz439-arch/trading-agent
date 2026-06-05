@@ -26,6 +26,44 @@ _SECTORS = ["XLK", "XLF", "XLE", "XLV", "XLI"]
 _MACRO = ["^VIX", "SPY", "UUP", "GLD", "TLT", "BTC-USD", "ETH-USD"]
 
 
+def fetch_vix(retries: int = 3) -> tuple[Optional[float], str]:
+    """Fetch VIX level + 5-day trend, robustly.
+
+    yfinance's ``^VIX`` is flaky (rate limits / empty frames), so we try the
+    single-ticker ``Ticker.history`` path and the ``download`` path across a few
+    retries with backoff. Returns ``(None, "unknown")`` if every attempt fails,
+    so callers can fall back to ATR-percentile volatility.
+    """
+    import time as _time
+    import yfinance as yf
+
+    def _series(method: str) -> Optional[pd.Series]:
+        if method == "history":
+            df = yf.Ticker("^VIX").history(period="1mo")
+            close = df["Close"] if "Close" in df else None
+        else:
+            df = yf.download("^VIX", period="1mo", interval="1d", progress=False)
+            close = df["Close"] if "Close" in df else None
+        if close is None:
+            return None
+        if hasattr(close, "columns"):       # MultiIndex single-ticker frame
+            close = close.iloc[:, 0]
+        return close.dropna()
+
+    for attempt in range(max(1, retries)):
+        for method in ("history", "download"):
+            try:
+                h = _series(method)
+                if h is not None and len(h) >= 5:
+                    last = float(h.iloc[-1])
+                    return last, ("rising" if last > float(h.iloc[-5]) else "falling")
+            except Exception:
+                pass
+        _time.sleep(0.8 * (attempt + 1))    # brief backoff before retrying
+    logger.info("VIX fetch failed after %d retries — caller should fall back", retries)
+    return None, "unknown"
+
+
 @dataclass
 class Sentiment:
     vix: Optional[float] = None
@@ -89,10 +127,13 @@ class SentimentAnalyzer:
     def _build(self, closes: dict[str, pd.Series]) -> Sentiment:
         s = Sentiment()
 
-        # VIX / Fear & Greed proxy.
+        # VIX / Fear & Greed proxy. Use the batch value if present, else retry
+        # a dedicated fetch (the batch ^VIX column is the flakiest one).
         vix_s = closes.get("^VIX")
-        if vix_s is not None and len(vix_s):
-            s.vix = float(vix_s.iloc[-1])
+        s.vix = float(vix_s.iloc[-1]) if (vix_s is not None and len(vix_s)) else None
+        if s.vix is None:
+            s.vix, _ = fetch_vix(retries=2)
+        if s.vix is not None:
             s.fear_greed = (
                 "extreme_fear" if s.vix > 32 else
                 "fear" if s.vix > 24 else
