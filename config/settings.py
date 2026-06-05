@@ -47,7 +47,7 @@ RSI_SHORT_THRESHOLD: float = 50.0  # short requires RSI below this
 # --------------------------------------------------------------------------- #
 # Reward / risk filter
 # --------------------------------------------------------------------------- #
-RR_RATIO: float = 5.0              # minimum acceptable reward:risk
+RR_RATIO: float = 4.0              # minimum acceptable reward:risk
 ATR_PERIOD: int = 14
 ATR_MULTIPLIER: float = 1.5        # stop distance = ATR * multiplier
 SWING_LOOKBACK: int = 100          # bars scanned for structural path veto
