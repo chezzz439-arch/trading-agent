@@ -71,7 +71,7 @@ class TradingAgent:
         self.mtf = MTFConfluence(self.feed, timeframes=settings.MTF_TIMEFRAMES,
                                  lookback=settings.LOOKBACK_BARS,
                                  min_confluence=settings.MIN_CONFLUENCE)
-        self.scorer = MasterScorer(min_score=settings.MIN_SCORE)
+        self.scorer = MasterScorer(min_score=settings.MIN_SCORE, rr_target=settings.RR_RATIO)
         self.rr_filter = RRFilter(rr_ratio=settings.RR_RATIO, atr_period=settings.ATR_PERIOD,
                                   atr_multiplier=settings.ATR_MULTIPLIER,
                                   swing_lookback=settings.SWING_LOOKBACK,

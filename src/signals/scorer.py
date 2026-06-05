@@ -52,8 +52,11 @@ class TradeScore:
 
 
 class MasterScorer:
-    def __init__(self, min_score: float = 70.0):
+    def __init__(self, min_score: float = 70.0, rr_target: float = 5.0):
         self.min_score = min_score
+        # Reward:risk that earns full marks — keep in sync with the RR filter's
+        # ratio so a target-meeting trade isn't penalised when the target moves.
+        self.rr_target = rr_target
 
     def score(
         self,
@@ -193,7 +196,8 @@ class MasterScorer:
     def _risk_reward(self, plan: Optional[TradePlan], s) -> float:
         if plan is None:
             return 0.0
-        if plan.rr >= 5.0:
-            # Full points at 5:1, small bonus capped at 10 for better.
-            return round(min(MAX_POINTS["risk_reward"], 8 + (plan.rr - 5) * 0.5), 1)
-        return round(max(0.0, plan.rr / 5 * 6), 1)
+        t = self.rr_target
+        if plan.rr >= t:
+            # Full points at the target RR, small bonus capped at 10 for better.
+            return round(min(MAX_POINTS["risk_reward"], 8 + (plan.rr - t) * 0.5), 1)
+        return round(max(0.0, plan.rr / t * 6), 1)

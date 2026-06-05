@@ -57,6 +57,18 @@ def test_empty_components_do_not_pass():
     assert s.total < 70
 
 
+def test_rr_target_alignment_gives_full_marks():
+    # A 4:1 plan should earn full RR marks (8.0) when the scorer's target is 4:1,
+    # but only partial (4.8) when the target stays at 5:1.
+    plan4 = TradePlan("X", "long", 100, 98, 108, rr=4.0, risk_per_share=2, atr=2, reason="")
+    dummy = MasterScorer().score("X", "long")  # throwaway TradeScore for the helper
+    assert MasterScorer(rr_target=5.0)._risk_reward(plan4, dummy) == pytest.approx(4.8)
+    assert MasterScorer(rr_target=4.0)._risk_reward(plan4, dummy) == pytest.approx(8.0)
+    # 5:1 still earns full marks at the 5:1 target (unchanged default behaviour).
+    plan5 = TradePlan("X", "long", 100, 98, 110, rr=5.0, risk_per_share=2, atr=2, reason="")
+    assert MasterScorer(rr_target=5.0)._risk_reward(plan5, dummy) == pytest.approx(8.0)
+
+
 def test_mtf_opposed_direction_scores_zero():
     tech, quant, regime, mtf, ml, plan = _strong_components()
     mtf.dominant_direction = "short"   # opposes the long candidate

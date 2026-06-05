@@ -98,9 +98,10 @@ def score_symbol(sym: str, feed, spy_df) -> tuple:
         regime = RegimeDetector().detect(df, spy_df=spy_df if not spy_df.empty else None)
         sig = Signal(sym, side, float(df["close"].iloc[-1]), tech.values.get("rsi14") or 50,
                      df.index[-1], side)
-        plan = RRFilter(swing_lookback=settings.SWING_LOOKBACK).evaluate(sig, df)
-        sc = MasterScorer().score(sym, side, technical=tech, quant=quant, regime=regime,
-                                  plan=plan)
+        plan = RRFilter(rr_ratio=settings.RR_RATIO,
+                        swing_lookback=settings.SWING_LOOKBACK).evaluate(sig, df)
+        sc = MasterScorer(rr_target=settings.RR_RATIO).score(
+            sym, side, technical=tech, quant=quant, regime=regime, plan=plan)
         return sym, sc.total, side
     except Exception:
         return sym, 0.0, "neutral"

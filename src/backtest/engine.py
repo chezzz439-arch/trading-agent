@@ -190,7 +190,9 @@ class Backtester:
             return None
 
         tech_a, quant_a = TechnicalAnalysis(), QuantAnalysis()
-        regime_d, scorer = RegimeDetector(), MasterScorer(min_score=min_score)
+        regime_d = RegimeDetector()
+        # Keep the scorer's RR benchmark in sync with the filter's target.
+        scorer = MasterScorer(min_score=min_score, rr_target=self.rr_filter.rr_ratio)
         risk = PortfolioRisk(min_score=min_score)
         fractional = is_crypto(symbol)
 
