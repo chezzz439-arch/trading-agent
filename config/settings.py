@@ -126,6 +126,16 @@ def load_watchlist() -> list[str]:
     return WATCHLIST
 
 
+def load_watchlist_meta() -> dict:
+    """Per-symbol metadata (name/sector/asset_class/tradable/category/size_override)."""
+    import json
+    try:
+        with open(WATCHLIST_PATH) as f:
+            return json.load(f).get("meta", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
 # --------------------------------------------------------------------------- #
 # Monitoring
 # --------------------------------------------------------------------------- #

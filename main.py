@@ -88,8 +88,9 @@ class TradingAgent:
         )
         self.broker = Broker(k, s, paper=settings.PAPER)
         self.dashboard = Dashboard(log_dir=settings.LOG_DIR)
-        # Dynamic watchlist (screened) + per-symbol eligibility gate.
+        # Dynamic watchlist (screened) + per-symbol metadata + eligibility gate.
         self.watchlist = settings.load_watchlist()
+        self.meta = settings.load_watchlist_meta()
         self.screener = UniverseScreener(ScreenCriteria(
             min_price=settings.SCREEN_MIN_PRICE,
             min_market_cap=settings.SCREEN_MIN_MARKET_CAP,
@@ -336,8 +337,17 @@ class TradingAgent:
             logger.info("%s: blocked by risk: %s", symbol, decision.reasons)
             return dash_row
 
+        # Data-only symbols (e.g. crypto Alpaca can't trade) are analyzed but
+        # never ordered.
+        m = self.meta.get(symbol, {})
+        if m.get("asset_class") == "crypto" and m.get("tradable") is False:
+            logger.info("%s: data-only (not tradable on Alpaca) — no order", symbol)
+            return dash_row
+
         fraction = self.portfolio.adjust_fraction(decision.risk_fraction,
                                                   regime.volatility, corr)
+        if m.get("size_override"):   # e.g. meme coins use a smaller fraction
+            fraction = min(fraction, float(m["size_override"]))
         sizer = PositionSizer(risk_per_trade=fraction, max_position_pct=settings.MAX_POSITION_PCT)
         trade = sizer.size(plan, equity, fractional=is_crypto(symbol))
         if trade is None:
@@ -590,6 +600,7 @@ class TradingAgent:
             if new:
                 old = set(self.watchlist)
                 self.watchlist = new
+                self.meta = settings.load_watchlist_meta()
                 logger.info("Watchlist refreshed: %d symbols (+%d/-%d)", len(new),
                             len(set(new) - old), len(old - set(new)))
         except Exception:
