@@ -12,7 +12,17 @@ shared state file, so the HALT button writes a control flag the agent polls.
 
 from __future__ import annotations
 
+import asyncio
 import time
+
+# Streamlit reruns this script in a worker thread that may not have an asyncio
+# event loop (or has a closed one), which breaks libraries that use asyncio
+# (Alpaca/yfinance) with "RuntimeError: Event loop is closed" on Python 3.14.
+# Ensure every run has a live loop for the current thread.
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -76,7 +86,7 @@ def page_overview(state):
         fig = go.Figure(go.Scatter(x=df["t"], y=df["equity"], mode="lines",
                                    line=dict(color="#2ca02c")))
         fig.update_layout(title="Account Equity", height=380, margin=dict(t=40, b=20))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("Equity history accumulates as the agent runs.")
 
@@ -85,7 +95,7 @@ def page_overview(state):
     if halted:
         st.error("Trading is HALTED.")
     else:
-        if st.button("🛑  HALT ALL TRADING", type="primary", use_container_width=True):
+        if st.button("🛑  HALT ALL TRADING", type="primary", width="stretch"):
             get_store().request_halt("manual HALT from Streamlit dashboard")
             st.error("HALT requested — the agent will flatten the book on its next loop.")
 
@@ -105,14 +115,14 @@ def page_positions(state):
                 "Unreal %": float(getattr(p, "unrealized_plpc", 0) or 0) * 100,
             })
         st.dataframe(pd.DataFrame(rows) if rows else pd.DataFrame({"info": ["no open positions"]}),
-                     use_container_width=True)
+                     width="stretch")
     except Exception as e:
         st.error(f"Could not load positions from Alpaca: {e}")
 
     st.subheader("Closed today")
     closed = state.get("closed_today", [])
     st.dataframe(pd.DataFrame(closed) if closed else pd.DataFrame({"info": ["none yet"]}),
-                 use_container_width=True)
+                 width="stretch")
 
 
 def _score_color(score):
@@ -135,12 +145,12 @@ def page_scanner(state):
                     text=[f"{v:.0f}" for v in vals], textposition="outside")
         fig.update_layout(title="Current scores (0-100)", height=420, xaxis_range=[0, 100],
                           margin=dict(t=40))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.divider()
     st.subheader("Symbol deep-dive")
     sym = st.selectbox("Symbol", settings.load_watchlist())
-    if st.button("Analyze", use_container_width=True):
+    if st.button("Analyze", width="stretch"):
         with st.spinner(f"Analyzing {sym}…"):
             _analyze_symbol(sym)
 
@@ -180,14 +190,14 @@ def page_performance(state):
     df = df.set_index("t")
     fig = go.Figure(go.Scatter(x=df.index, y=df["equity"], mode="lines"))
     fig.update_layout(title="Equity curve (since agent start)", height=360)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Drawdown
     peak = df["equity"].cummax()
     dd = (df["equity"] - peak) / peak * 100
     ddfig = go.Figure(go.Scatter(x=df.index, y=dd, fill="tozeroy", line=dict(color="#d62728")))
     ddfig.update_layout(title="Drawdown (%)", height=260)
-    st.plotly_chart(ddfig, use_container_width=True)
+    st.plotly_chart(ddfig, width="stretch")
 
     closed = pd.DataFrame(state.get("closed_today", []))
     c1, c2, c3 = st.columns(3)
@@ -222,9 +232,9 @@ def page_backtest():
         if r.equity_curve is not None and len(r.equity_curve):
             fig = go.Figure(go.Scatter(x=r.equity_curve.index, y=r.equity_curve.values, mode="lines"))
             fig.update_layout(title=f"{sym} equity curve", height=360)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         if r.trades is not None and not r.trades.empty:
-            st.dataframe(r.trades, use_container_width=True)
+            st.dataframe(r.trades, width="stretch")
 
 
 # --------------------------------------------------------------------------- #

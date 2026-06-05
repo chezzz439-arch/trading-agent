@@ -37,7 +37,7 @@ MIN_PRICE = 15.0
 MIN_MARKET_CAP = 3e9
 MIN_AVG_VOLUME = 1e6
 _OTC_MARKERS = ("OTC", "PNK", "PINK", "GREY")
-WATCHLIST_PATH = os.path.join("config", "watchlist.json")
+WATCHLIST_PATH = settings.WATCHLIST_PATH
 
 
 def sp500_symbols() -> list[str]:
