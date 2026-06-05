@@ -574,6 +574,28 @@ class TradingAgent:
                 stats_text=f"Equity ${equity:,.2f} | Week PnL ${equity - week_start:,.2f}")
             self._sent["weekly"] = week
 
+        # Monday ~8am ET: re-screen the S&P 500 and reload the watchlist.
+        if now_et.weekday() == 0 and now_et.hour == 8 and self._sent.get("watchlist_week") != week:
+            self._refresh_watchlist()
+            self._sent["watchlist_week"] = week
+
+    def _refresh_watchlist(self) -> None:
+        """Re-run the universe screener (subprocess) and reload the watchlist."""
+        import subprocess
+        try:
+            logger.info("Weekly watchlist refresh: running universe screener…")
+            subprocess.run([sys.executable, "scripts/universe_screener.py"],
+                           timeout=900, check=False)
+            new = settings.load_watchlist()
+            if new:
+                old = set(self.watchlist)
+                self.watchlist = new
+                logger.info("Watchlist refreshed: %d symbols (+%d/-%d)", len(new),
+                            len(set(new) - old), len(old - set(new)))
+        except Exception:
+            logger.exception("Weekly watchlist refresh failed")
+            self.notifier.error_alert("Weekly watchlist refresh failed")
+
     def _send_daily_summary(self, equity, day_start) -> None:
         ct = self._closed_today
         wins = sum(1 for t in ct if t["pnl"] > 0)

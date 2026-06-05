@@ -118,16 +118,22 @@ def build_live(state: dict) -> dict:
             "score": float(m.get("score") or 0),
             "reasons": ["Passed the bot's full checklist"],
         })
+    # Show the FULL watchlist: live score where the bot has deep-scanned it,
+    # else "awaiting scan" (the pre-rank only deep-scans the top names each cycle).
+    scores_by = {s["symbol"]: s for s in state.get("scores", [])}
     watching = []
-    for s in sorted(state.get("scores", []), key=lambda d: d.get("score", 0), reverse=True):
-        sc = s.get("score", 0)
-        view = "BULLISH" if sc >= 70 else "BEARISH" if sc < 50 else "NEUTRAL"
+    for sym in settings.load_watchlist():
+        s = scores_by.get(sym)
+        scored = s is not None
+        sc = float(s.get("score", 0)) if scored else 0.0
+        view = "BULLISH" if (scored and sc >= 70) else ("BEARISH" if (scored and sc < 50) else "NEUTRAL")
         watching.append({
-            "emoji": _emoji(s["symbol"]), "name": s["symbol"], "symbol": s["symbol"],
-            "price": 0.0, "chg": 0.0, "view": view, "score": sc,
-            "status": "OWNED" if s["symbol"] in managed else (
-                "WATCHING" if sc >= 50 else "AVOIDING"),
-            "reasons": ["Bot's live confidence score"]})
+            "emoji": _emoji(sym), "name": sym, "symbol": sym, "price": 0.0, "chg": 0.0,
+            "view": view, "score": sc, "scored": scored,
+            "status": "OWNED" if sym in managed else ("WATCHING" if (not scored or sc >= 50) else "AVOIDING"),
+            "reasons": ["Bot's live confidence score"] if scored else ["Pre-screened — awaiting next deep scan"]})
+    # Scored names first, by score.
+    watching.sort(key=lambda w: (w["scored"], w["score"]), reverse=True)
     return {
         "is_sample": False, "started": started, "equity": equity,
         "daily_pnl": float(state.get("daily_pnl", 0)),
@@ -356,29 +362,46 @@ def page_watching(d):
     if not items:
         st.info("Nothing matches that filter right now.")
         return
+
+    # Pagination — 25 per page.
+    per_page = 25
+    pages = max(1, (len(items) + per_page - 1) // per_page)
+    pg = 1
+    if pages > 1:
+        pg = st.number_input(f"Page (1–{pages}) · showing {len(items)} markets",
+                             min_value=1, max_value=pages, value=1, step=1)
+    page_items = items[(pg - 1) * per_page: pg * per_page]
     cols = st.columns(3)
-    for i, w in enumerate(items):
+    for i, w in enumerate(page_items):
         with cols[i % 3]:
             _watch_card(w)
 
 
 def _watch_card(w):
+    scored = w.get("scored", True)
     view_emoji = {"BULLISH": "👍", "NEUTRAL": "😐", "BEARISH": "👎"}[w["view"]]
     view_word = {"BULLISH": "Bot likes it", "NEUTRAL": "Bot waiting", "BEARISH": "Bot avoiding"}[w["view"]]
-    bar_col = GREEN if w["score"] >= 70 else (RED if w["score"] < 50 else GREY)
-    strength = "Strong" if w["score"] >= 70 else "Weak" if w["score"] < 50 else "Moderate"
     status_map = {"OWNED": "✅ OWNED", "WATCHING": "👀 WATCHING", "AVOIDING": "🚫 AVOIDING"}
     chg = w.get("chg", 0)
     price = f"{money(w['price'])} {'▲' if chg>=0 else '▼'} {chg:+.1f}%" if w.get("price") else "live"
     reasons = "".join(f"<div class='reason' style='font-size:13px'>• {r}</div>" for r in w["reasons"])
+    if scored:
+        bar_col = GREEN if w["score"] >= 70 else (RED if w["score"] < 50 else GREY)
+        strength = "Strong" if w["score"] >= 70 else "Weak" if w["score"] < 50 else "Moderate"
+        conf = (f"<div class='muted' style='font-size:13px'>Confidence: {w['score']:.0f}/100</div>"
+                f"<div class='bar' style='height:8px'><div class='fill' "
+                f"style='width:{w['score']}%;background:{bar_col}'></div></div>"
+                f"<div class='muted' style='font-size:12px'>{strength}</div>")
+    else:
+        conf = ("<div class='muted' style='font-size:13px'>Confidence: — (awaiting scan)</div>"
+                f"<div class='bar' style='height:8px'><div class='fill' "
+                f"style='width:50%;background:{GREY}'></div></div>")
     st.markdown(f"""
 <div class='card' style='min-height:230px'>
   <div class='pos-title' style='font-size:17px'>{w['emoji']} {w['name']}</div>
   <div class='muted' style='font-size:13px'>{w['symbol']} · {price}</div>
   <div style='margin:8px 0;font-weight:800'>{view_emoji} {view_word}</div>
-  <div class='muted' style='font-size:13px'>Confidence: {w['score']:.0f}/100</div>
-  <div class='bar' style='height:8px'><div class='fill' style='width:{w["score"]}%;background:{bar_col}'></div></div>
-  <div class='muted' style='font-size:12px'>{strength}</div>
+  {conf}
   <div style='margin-top:8px'>{reasons}</div>
   <div style='margin-top:8px;font-weight:700;font-size:13px'>{status_map[w['status']]}</div>
 </div>""", unsafe_allow_html=True)
