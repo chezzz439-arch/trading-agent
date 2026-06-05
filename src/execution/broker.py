@@ -70,6 +70,15 @@ class Broker:
     def open_symbols(self) -> set[str]:
         return {p.symbol for p in self.get_positions()}
 
+    def open_order_symbols(self) -> set[str]:
+        """All symbols with a working order (one call, for the pre-rank pass)."""
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
+            return {o.symbol for o in self._client.get_orders(filter=req)}
+        except Exception:
+            logger.exception("Failed to fetch open orders")
+            return set()
+
     def has_open_order(self, symbol: str) -> bool:
         """True if a working order already exists for ``symbol``."""
         try:

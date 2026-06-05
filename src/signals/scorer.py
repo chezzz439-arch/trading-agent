@@ -58,6 +58,15 @@ class MasterScorer:
         # ratio so a target-meeting trade isn't penalised when the target moves.
         self.rr_target = rr_target
 
+    def prerank_score(self, symbol: str, side: str, technical) -> float:
+        """Cheap technical+momentum-only score (0–35) for fast candidate ranking.
+
+        Uses no network/heavy inputs, so it can rank the whole universe quickly;
+        the full pipeline then runs on the top-ranked names.
+        """
+        s = TradeScore(symbol=symbol, side=side, min_score=self.min_score)
+        return round(self._technical(side, technical, s) + self._momentum(side, technical, s), 1)
+
     def score(
         self,
         symbol: str,

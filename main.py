@@ -237,42 +237,70 @@ class TradingAgent:
         self._detect_closed_trades(positions, equity)
         held_closes = self._held_closes(open_symbols)
 
-        scores_for_dash = []
+        order_syms = self.broker.open_order_symbols()
+
+        # --- Pre-rank: cheap technical-only pass over the whole universe -- #
+        candidates = []
         for symbol in self.watchlist:
             try:
-                result = self._evaluate(symbol, equity, open_symbols, held_closes,
-                                        sentiment, spy_df)
-                if result is not None:
-                    scores_for_dash.append(result)
+                c = self._prerank(symbol, open_symbols, order_syms)
+                if c is not None:
+                    candidates.append(c)
             except Exception:
-                logger.exception("Error evaluating %s", symbol)
+                logger.exception("Pre-rank failed for %s", symbol)
+        candidates.sort(key=lambda c: c["pre_score"], reverse=True)
+        top = candidates[: settings.PRERANK_TOP_N]
+        logger.info("Pre-ranked %d/%d candidates; deep-analyzing top %d",
+                    len(candidates), len(self.watchlist), len(top))
+
+        # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
+        scores_for_dash = []
+        for c in top:
+            try:
+                row = self._full_evaluate(c, equity, open_symbols, held_closes,
+                                          sentiment, spy_df)
+                if row is not None:
+                    scores_for_dash.append(row)
+            except Exception:
+                logger.exception("Error evaluating %s", c["symbol"])
 
         state = self._build_state(positions, scores_for_dash, equity, buying_power, sentiment)
         self.dashboard.print(state)
         self._write_state(positions, scores_for_dash, equity, buying_power, sentiment)
         self._scheduled_summaries(equity, day_start, sentiment)
 
-    def _evaluate(self, symbol, equity, open_symbols, held_closes, sentiment, spy_df):
+    def _prerank(self, symbol, open_symbols, order_syms):
+        """Cheap pass: bars + screen + technical -> a fast ranking score.
+
+        Returns a candidate dict (reusing the fetched df + technical so the full
+        pass doesn't recompute them) or None to skip the symbol.
+        """
         if symbol in open_symbols or symbol.replace("/", "") in open_symbols:
             return None
-        if self.broker.has_open_order(symbol):
+        if symbol in order_syms or symbol.replace("/", "") in order_syms:
             return None
 
         df = self.feed.get_bars(symbol, "1Day", settings.LOOKBACK_BARS)
         if df.empty or len(df) < 60:
             return None
 
-        # ---- Universe screen: skip ineligible names before analysis ----- #
         eligible, reason = self.screener.passes(symbol, df)
         if not eligible:
             logger.info("%s: screened out — %s", symbol, reason)
             return None
 
-        # ---- Phase 1: technical -> candidate direction ------------------ #
         tech = self.technical.analyze(df)
         if tech is None or tech.trend_bias == "neutral":
             return None
         side = tech.trend_bias
+        pre_score = self.scorer.prerank_score(symbol, side, tech)
+        return {"symbol": symbol, "df": df, "tech": tech, "side": side,
+                "pre_score": pre_score}
+
+    def _full_evaluate(self, c, equity, open_symbols, held_closes, sentiment, spy_df):
+        """Expensive pass on a pre-ranked candidate: quant/regime/MTF/ML -> score
+        -> risk gates -> sized entry. Reuses the candidate's df + technical."""
+        symbol, df, tech, side = c["symbol"], c["df"], c["tech"], c["side"]
 
         # ---- Phases 2-6 ------------------------------------------------- #
         quant = self.quant.analyze(df, market_df=spy_df if not spy_df.empty else None)

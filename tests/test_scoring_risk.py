@@ -50,6 +50,15 @@ def test_strong_setup_scores_high_and_passes():
     assert s.breakdown["mtf"] == pytest.approx(15.0)
 
 
+def test_prerank_score_is_technical_plus_momentum():
+    tech, *_ = _strong_components()
+    pre = MasterScorer().prerank_score("X", "long", tech)
+    # Strong long setup: technical (20) + momentum (15) caps at 35.
+    assert pre == pytest.approx(35.0)
+    # Bounded to the 0-35 range for any input.
+    assert 0 <= MasterScorer().prerank_score("X", "short", tech) <= 35
+
+
 def test_empty_components_do_not_pass():
     # No analysis at all -> neutral fallbacks, no RR -> below the 70 gate.
     s = MasterScorer().score("X", "long")

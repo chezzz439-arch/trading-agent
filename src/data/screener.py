@@ -48,13 +48,18 @@ class UniverseScreener:
         if is_crypto(symbol):
             return True, "crypto (equity filters n/a)"
         try:
-            price, avg_vol = self._price_volume(symbol, df)
+            fund = self._fundamentals(symbol)
+            # Price can come from the (accurate) close, but volume must NOT —
+            # Alpaca's IEX feed reports only ~2-3% of consolidated volume, so we
+            # use the full-market average from fast_info for the liquidity gate.
+            price = (float(df["close"].iloc[-1]) if (df is not None and not df.empty)
+                     else fund.get("price"))
+            avg_vol = fund.get("avg_volume")
+
             if price is not None and price < self.criteria.min_price:
                 return False, f"price ${price:.2f} < ${self.criteria.min_price:.0f}"
             if avg_vol is not None and avg_vol < self.criteria.min_avg_volume:
                 return False, f"avg vol {avg_vol:,.0f} < {self.criteria.min_avg_volume:,.0f}"
-
-            fund = self._fundamentals(symbol)
             exch = (fund.get("exchange") or "").upper()
             if any(m in exch for m in _OTC_MARKERS):
                 return False, f"OTC/pink ({exch})"
@@ -67,12 +72,6 @@ class UniverseScreener:
             return True, "screen error (fail-open)"
 
     # ------------------------------------------------------------------ #
-    def _price_volume(self, symbol, df):
-        if df is not None and not df.empty and "volume" in df:
-            return float(df["close"].iloc[-1]), float(df["volume"].tail(20).mean())
-        fund = self._fundamentals(symbol)
-        return fund.get("price"), fund.get("avg_volume")
-
     def _fundamentals(self, symbol: str) -> dict:
         cached = self._cache.get(symbol)
         now = datetime.now(timezone.utc)
