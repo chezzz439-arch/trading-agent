@@ -84,7 +84,8 @@ class UniverseScreener:
     @staticmethod
     def _fetch(symbol: str) -> dict:
         import yfinance as yf
-        fi = yf.Ticker(symbol.replace("/", "-")).fast_info
+        # yfinance uses dashes for class shares (BRK.B -> BRK-B) and crypto.
+        fi = yf.Ticker(symbol.replace("/", "-").replace(".", "-")).fast_info
         out = {}
         for key, attr in (("market_cap", "market_cap"), ("price", "last_price"),
                           ("avg_volume", "three_month_average_volume"),
