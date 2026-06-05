@@ -20,6 +20,7 @@ import signal as signal_module
 import sys
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from config import settings
 from src.data.feed import MarketFeed, is_crypto
@@ -36,6 +37,8 @@ from src.signals.scorer import MasterScorer
 from src.signals.sentiment import SentimentAnalyzer
 from src.signals.strategy import Signal
 from src.signals.technical import TechnicalAnalysis
+from src.monitoring.state_store import StateStore
+from src.monitoring.telegram_bot import TelegramNotifier
 
 logger = logging.getLogger("trading_agent")
 
@@ -78,9 +81,17 @@ class TradingAgent:
         )
         self.broker = Broker(k, s, paper=settings.PAPER)
         self.dashboard = Dashboard(log_dir=settings.LOG_DIR)
+        # Monitoring layers (Layer 1 Streamlit reads state file; Layer 2 Telegram;
+        # Layer 3 terminal dash reads state file).
+        self.state_store = StateStore(log_dir=settings.LOG_DIR)
+        self.notifier = TelegramNotifier()
         self._ml: dict[str, MLEnsemble] = {}     # per-symbol ensemble cache
         self._running = True
         self._open_risk: dict[str, float] = {}   # symbol -> intended dollar risk
+        self._pos_pnl: dict[str, float] = {}     # last seen unrealized PnL per symbol
+        self._closed_today: list[dict] = []
+        self._sent: dict[str, str] = {}          # summary-type -> date/week already sent
+        self._streamlit_proc = None
         self._scan_count = 0
 
     @staticmethod
@@ -94,25 +105,60 @@ class TradingAgent:
         self._running = False
 
     def run(self) -> None:
+        # --- Startup sequence -------------------------------------------- #
+        mode = "PAPER" if settings.PAPER else "LIVE"
         try:
-            eq = self.broker.get_equity()
+            acct = self.broker.get_account()
+            if str(acct.status) not in ("AccountStatus.ACTIVE", "ACTIVE"):
+                self.notifier.error_alert(f"Alpaca account not active: {acct.status}")
+                sys.exit(f"Alpaca account not active: {acct.status}")
+            eq = float(acct.equity)
             self.portfolio.set_day_start_equity(eq)
             self.portfolio.set_week_start_equity(eq)
-        except Exception:
-            logger.exception("Could not read starting equity")
+            logger.info("Alpaca connected: %s equity=$%.2f", acct.status, eq)
+        except SystemExit:
+            raise
+        except Exception as e:
+            self.notifier.error_alert(f"Startup: could not connect to Alpaca: {e}")
+            logger.exception("Could not read starting account")
+            eq = 0.0
+
+        self._start_streamlit()
+        self.notifier.startup(mode, eq)
         logger.info("Agent started | mode=%s | %d symbols | interval=%ds | min_score=%.0f",
-                    "PAPER" if settings.PAPER else "LIVE", len(settings.WATCHLIST),
-                    settings.SCAN_INTERVAL, settings.MIN_SCORE)
+                    mode, len(settings.WATCHLIST), settings.SCAN_INTERVAL, settings.MIN_SCORE)
+        consecutive_errors = 0
         while self._running:
             try:
                 self.scan_once()
-            except Exception:
+                consecutive_errors = 0
+            except Exception as e:
                 logger.exception("Scan cycle failed")
+                consecutive_errors += 1
+                # Alert once on first failure (likely Alpaca/connection loss).
+                if consecutive_errors == 1:
+                    self.notifier.error_alert(f"Scan cycle failed: {type(e).__name__}: {e}")
             self._scan_count += 1
             if not self._running:
                 break
             self._sleep(settings.SCAN_INTERVAL)
         self._on_exit()
+
+    def _start_streamlit(self) -> None:
+        """Launch the Streamlit dashboard as a background subprocess."""
+        if not getattr(settings, "STREAMLIT_AUTOSTART", True):
+            return
+        try:
+            import subprocess
+            self._streamlit_proc = subprocess.Popen(
+                [sys.executable, "-m", "streamlit", "run",
+                 "src/monitoring/dashboard_app.py",
+                 "--server.port", "8501", "--server.headless", "true"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            logger.info("Streamlit dashboard launching at http://localhost:8501")
+        except Exception:
+            logger.exception("Could not launch Streamlit (run it manually)")
 
     def _sleep(self, seconds: int) -> None:
         for _ in range(seconds):
@@ -125,16 +171,34 @@ class TradingAgent:
             self.dashboard.daily_report(self._build_state([], []))
         except Exception:
             logger.exception("daily report on exit failed")
+        if self._streamlit_proc is not None:
+            try:
+                self._streamlit_proc.terminate()
+            except Exception:
+                pass
         logger.info("Agent stopped.")
 
     # ------------------------------------------------------------------ #
     def scan_once(self) -> None:
         equity = self.broker.get_equity()
         buying_power = self.broker.get_buying_power()
+        day_start = self.portfolio._day_start_equity or equity
+
+        # Dashboard HALT button (cross-process control flag).
+        halt_reason = self.state_store.halt_requested()
+        if halt_reason and not self.portfolio.halted:
+            self.portfolio.halted = True
+            self.broker.close_all()
+            self.notifier.kill_switch(reason=halt_reason, daily_loss=day_start - equity)
+            self.dashboard.alert("kill_switch", halt_reason)
+            self.state_store.clear_halt()
 
         if self.portfolio.kill_switch_triggered(equity):
             self.broker.close_all()
+            self.notifier.kill_switch(reason="risk limit breached",
+                                      daily_loss=day_start - equity)
             self.dashboard.alert("kill_switch", "Trading halted — book flattened")
+            self._write_state([], [], equity, buying_power, None)
             return
 
         sentiment = self.sentiment.analyze(now=time.time())
@@ -142,6 +206,7 @@ class TradingAgent:
 
         positions = self.broker.get_positions()
         open_symbols = {p.symbol for p in positions}
+        self._detect_closed_trades(positions, equity)
         held_closes = self._held_closes(open_symbols)
 
         scores_for_dash = []
@@ -154,9 +219,10 @@ class TradingAgent:
             except Exception:
                 logger.exception("Error evaluating %s", symbol)
 
-        state = self._build_state(positions, scores_for_dash, equity, buying_power,
-                                  sentiment)
+        state = self._build_state(positions, scores_for_dash, equity, buying_power, sentiment)
         self.dashboard.print(state)
+        self._write_state(positions, scores_for_dash, equity, buying_power, sentiment)
+        self._scheduled_summaries(equity, day_start, sentiment)
 
     def _evaluate(self, symbol, equity, open_symbols, held_closes, sentiment, spy_df):
         if symbol in open_symbols or symbol.replace("/", "") in open_symbols:
@@ -190,8 +256,12 @@ class TradingAgent:
 
         dash_row = {"symbol": symbol, "side": side, "score": score.total,
                     "passed": score.passed}
-        if score.total >= 80:
+        # High-score watch alert: 80+ that won't actually trade (no plan / gate).
+        if score.total >= 80 and (not score.passed or plan is None):
             self.dashboard.alert("high_score", f"{symbol} {side} scored {score.total:.0f}")
+            self.notifier.high_score(symbol=symbol, side=side, score=score.total,
+                                     reason="no valid 5:1 plan" if plan is None
+                                     else f"gated (score {score.total:.0f})")
         if not score.passed or plan is None:
             return dash_row
 
@@ -224,6 +294,11 @@ class TradingAgent:
             self._open_risk[symbol] = trade.dollar_risk
             logger.info("%s: ENTERED score=%.0f rr=%.1f risk=$%.2f frac=%.3f%%",
                         symbol, score.total, plan.rr, trade.dollar_risk, fraction * 100)
+            self.notifier.trade_opened(
+                symbol=symbol, side=side, entry=plan.entry, stop=plan.stop,
+                target=plan.target, rr=plan.rr, score=score.total,
+                dollar_risk=trade.dollar_risk, risk_pct=fraction * 100,
+                regime=regime.label)
         return dash_row
 
     # ------------------------------------------------------------------ #
@@ -273,7 +348,81 @@ class TradingAgent:
             regime_label="(per-symbol)",
             risk_state=sentiment.risk_state if sentiment else "unknown",
             open_positions=open_pos, scores=scores, halted=self.portfolio.halted,
+            closed_today=self._closed_today,
         )
+
+    # ------------------------------------------------------------------ #
+    # Monitoring integration helpers
+    # ------------------------------------------------------------------ #
+    def _write_state(self, positions, scores, equity, buying_power, sentiment) -> None:
+        st = self._build_state(positions, scores, equity, buying_power, sentiment)
+        self.state_store.write_state({
+            "equity": st.equity, "buying_power": st.buying_power,
+            "daily_pnl": st.daily_pnl, "weekly_pnl": st.weekly_pnl,
+            "risk_state": st.risk_state, "halted": st.halted,
+            "open_positions": st.open_positions, "scores": st.scores,
+            "closed_today": st.closed_today,
+        })
+
+    def _detect_closed_trades(self, positions, equity) -> None:
+        """Detect positions that closed since last scan and alert (approx PnL).
+
+        Uses the last seen unrealized PnL as an estimate of realized PnL — exact
+        realization belongs to the (future) stateful P9 position manager.
+        """
+        current = {}
+        for p in positions:
+            try:
+                current[p.symbol] = float(getattr(p, "unrealized_pl", 0) or 0)
+            except (TypeError, ValueError):
+                current[p.symbol] = 0.0
+        for sym in set(self._pos_pnl) - set(current):
+            pnl = self._pos_pnl.get(sym, 0.0)
+            risk = self._open_risk.get(sym) or abs(pnl) or 1.0
+            rr = pnl / risk if risk else 0.0
+            self.notifier.trade_closed(symbol=sym, side="—", pnl=pnl,
+                                       rr_achieved=rr, equity_after=equity)
+            self.portfolio.record_trade_result(pnl)
+            self._closed_today.append({"symbol": sym, "pnl": round(pnl, 2),
+                                       "r_multiple": round(rr, 2)})
+            self._open_risk.pop(sym, None)
+        self._pos_pnl = current
+
+    def _scheduled_summaries(self, equity, day_start, sentiment) -> None:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        today = now_et.date().isoformat()
+        iso = now_et.isocalendar()
+        week = f"{iso.year}-W{iso.week}"
+
+        if now_et.hour == 9 and self._sent.get("health") != today:
+            self.notifier.system_health(
+                regime=sentiment.risk_state if sentiment else "unknown",
+                watchlist_n=len(settings.WATCHLIST), equity=equity)
+            self._sent["health"] = today
+
+        if now_et.hour >= 16 and now_et.weekday() < 5 and self._sent.get("daily") != today:
+            self._send_daily_summary(equity, day_start)
+            self._sent["daily"] = today
+            self._closed_today = []   # reset for the next session/day
+
+        if now_et.weekday() == 4 and now_et.hour >= 16 and self._sent.get("weekly") != week:
+            week_start = self.portfolio._week_start_equity or equity
+            self.notifier.weekly_summary(
+                stats_text=f"Equity ${equity:,.2f} | Week PnL ${equity - week_start:,.2f}")
+            self._sent["weekly"] = week
+
+    def _send_daily_summary(self, equity, day_start) -> None:
+        ct = self._closed_today
+        wins = sum(1 for t in ct if t["pnl"] > 0)
+        losses = len(ct) - wins
+        best = max(ct, key=lambda t: t["pnl"], default=None)
+        worst = min(ct, key=lambda t: t["pnl"], default=None)
+        week_start = self.portfolio._week_start_equity or equity
+        self.notifier.daily_summary(
+            trades=len(ct), wins=wins, losses=losses, pnl=equity - day_start,
+            best=f"{best['symbol']} ${best['pnl']:,.2f}" if best else "—",
+            worst=f"{worst['symbol']} ${worst['pnl']:,.2f}" if worst else "—",
+            equity=equity, weekly=equity - week_start)
 
 
 def main() -> None:

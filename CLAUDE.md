@@ -57,6 +57,10 @@ src/
     position_sizer.py         fixed-fractional sizing + position cap
   execution/broker.py     P9  Broker — bracket/limit entries, scale-out, dynamic stops
   monitoring/dashboard.py P10 Dashboard — console snapshot, alerts, daily report
+  monitoring/state_store.py   StateStore — cross-process JSON state + HALT control flag
+  monitoring/dashboard_app.py Streamlit dashboard (5 pages) — `streamlit run` it
+  monitoring/telegram_bot.py  TelegramNotifier — 10 alert types via Bot HTTP API
+  monitoring/terminal_dash.py TerminalDashboard — rich live terminal view
   backtest/engine.py          Backtester — run() (EMA) and run_pipeline() (scorer-gated)
   backtest/costs.py           CostModel — slippage + commission (equities/crypto presets)
   backtest/validation.py      Validator — walk-forward OOS, PSR/DSR, bootstrap, FDR, verdict
@@ -76,8 +80,25 @@ python -c "from src.backtest.engine import Backtester; \
   print(Backtester().run_pipeline('AAPL', period='2y').summary())"
 python -c "from src.backtest.validation import Validator; from config import settings; \
   print(Validator().validate(settings.WATCHLIST).verdict)"   # cost-aware significance verdict
-python main.py                            # live paper loop (Ctrl+C = graceful shutdown + report)
+python main.py                            # live paper loop (auto-launches Streamlit + Telegram)
 ```
+
+## Monitoring (3 layers)
+
+`main.py` initializes all three on startup. They share state via `logs/agent_state.json`
+(+ `logs/control.json` for the HALT button).
+
+```bash
+streamlit run src/monitoring/dashboard_app.py     # Layer 1 → http://localhost:8501
+python setup_telegram.py                          # Layer 2 → discover chat id + test
+python -m src.monitoring.terminal_dash            # Layer 3 → rich terminal view
+```
+
+Telegram sends 10 alert types. Firing now: startup, trade-opened, high-score,
+kill-switch, daily/weekly/health summaries, error alerts, and an approximate
+trade-closed (last unrealized PnL on position disappearance). Stop-to-breakeven
+and trailing-stop alerts are wired hooks awaiting the stateful P9 position
+manager. `STREAMLIT_AUTOSTART=False` in settings disables auto-launch.
 
 ## How to tune
 

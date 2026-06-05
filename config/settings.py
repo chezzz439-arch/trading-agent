@@ -88,3 +88,8 @@ LOOKBACK_BARS: int = 300                   # bars pulled per request
 # --------------------------------------------------------------------------- #
 SCAN_INTERVAL: int = 300           # seconds between scans (5 minutes)
 LOG_DIR: str = "logs"
+
+# --------------------------------------------------------------------------- #
+# Monitoring
+# --------------------------------------------------------------------------- #
+STREAMLIT_AUTOSTART: bool = True   # launch the Streamlit dashboard from main.py
