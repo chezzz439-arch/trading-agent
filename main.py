@@ -74,7 +74,8 @@ class TradingAgent:
         self.scorer = MasterScorer(min_score=settings.MIN_SCORE)
         self.rr_filter = RRFilter(rr_ratio=settings.RR_RATIO, atr_period=settings.ATR_PERIOD,
                                   atr_multiplier=settings.ATR_MULTIPLIER,
-                                  swing_lookback=settings.SWING_LOOKBACK)
+                                  swing_lookback=settings.SWING_LOOKBACK,
+                                  path_veto=settings.RR_PATH_VETO)
         self.portfolio = PortfolioRisk(
             max_positions=settings.MAX_CONCURRENT_POSITIONS,
             daily_loss_limit=settings.DAILY_LOSS_LIMIT,
@@ -341,9 +342,14 @@ class TradingAgent:
             mp = self.managed[sym]
             pos = by_sym.get(sym) or by_sym.get(sym.replace("/", ""))
             if pos is None:
-                # Gone from the broker -> its bracket stop/target filled.
+                if not mp.confirmed:
+                    # Order accepted but not filled yet (e.g. queued pre-open) —
+                    # wait for the fill rather than treating it as a close.
+                    continue
+                # Previously filled, now gone -> its bracket stop/target hit.
                 self._finalize_external_close(mp, equity)
                 continue
+            mp.confirmed = True
             try:
                 price = float(getattr(pos, "current_price", mp.entry) or mp.entry)
             except (TypeError, ValueError):

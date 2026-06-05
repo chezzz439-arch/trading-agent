@@ -74,6 +74,7 @@ class RRFilter:
         atr_period: int = 14,
         atr_multiplier: float = 1.5,
         swing_lookback: int = 100,
+        path_veto: bool = True,
     ) -> None:
         if rr_ratio <= 0 or atr_multiplier <= 0:
             raise ValueError("rr_ratio and atr_multiplier must be positive")
@@ -81,6 +82,9 @@ class RRFilter:
         self.atr_period = atr_period
         self.atr_multiplier = atr_multiplier
         self.swing_lookback = swing_lookback
+        # When False, accept constructed 5:1 targets even if a swing level sits
+        # in the path (looser; more trades, no structural confirmation).
+        self.path_veto = path_veto
 
     def evaluate(self, signal: Signal, df: pd.DataFrame) -> Optional[TradePlan]:
         """Build a 5:1 TradePlan if the path to target is structurally clear."""
@@ -111,7 +115,7 @@ class RRFilter:
                 return None
 
             # --- Secondary confirmation: structural path must be clear --- #
-            if not self._path_is_clear(signal.side, df, entry, target):
+            if self.path_veto and not self._path_is_clear(signal.side, df, entry, target):
                 logger.info(
                     "%s: rejected, structural resistance/support blocks path "
                     "to target (entry=%.2f target=%.2f)",

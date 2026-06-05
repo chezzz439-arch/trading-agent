@@ -70,6 +70,7 @@ class ManagedPosition:
     trailing_active: bool = False
     realized_pnl: float = 0.0
     last_r: float = 0.0
+    confirmed: bool = False    # True once the fill is seen at the broker
     status: str = "open"       # open | closed
 
     @classmethod
