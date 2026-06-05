@@ -102,6 +102,12 @@ class TelegramNotifier:
             f"RR achieved: {rr_achieved:+.2f}\n"
             f"Equity after: ${equity_after:,.2f}")
 
+    def scaled_out(self, *, symbol, tag, qty, price, realized_pnl, remaining) -> bool:
+        return self.send(
+            f"*SCALED OUT* 💰\nSymbol: {symbol} @ {tag}\n"
+            f"Sold: {qty} @ ${price:,.2f}\nRealized: ${realized_pnl:,.2f}\n"
+            f"Remaining: {remaining}")
+
     def stop_breakeven(self, *, symbol, new_stop, protected_pnl) -> bool:
         return self.send(
             f"*STOP → BREAKEVEN* 🛡️\nSymbol: {symbol}\n"

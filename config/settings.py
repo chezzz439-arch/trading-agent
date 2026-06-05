@@ -90,6 +90,17 @@ SCAN_INTERVAL: int = 300           # seconds between scans (5 minutes)
 LOG_DIR: str = "logs"
 
 # --------------------------------------------------------------------------- #
+# Position management (P9)
+# --------------------------------------------------------------------------- #
+SCALE_OUT_1_R: float = 2.0         # take first tranche at +2R
+SCALE_OUT_2_R: float = 3.5         # take second tranche at +3.5R
+SCALE_OUT_FRACTION: float = 0.33   # fraction of initial qty per tranche
+BREAKEVEN_R: float = 2.0           # move stop to entry at +2R
+TRAIL_R: float = 3.0               # start ATR-trailing the stop at +3R
+TIME_EXIT_BARS: int = 10           # close a stalled position after N bars...
+TIME_EXIT_MIN_R: float = 1.0       # ...if it hasn't reached this R by then
+
+# --------------------------------------------------------------------------- #
 # Monitoring
 # --------------------------------------------------------------------------- #
 STREAMLIT_AUTOSTART: bool = True   # launch the Streamlit dashboard from main.py

@@ -39,6 +39,11 @@ from src.signals.strategy import Signal
 from src.signals.technical import TechnicalAnalysis
 from src.monitoring.state_store import StateStore
 from src.monitoring.telegram_bot import TelegramNotifier
+from src.execution.position_manager import (
+    ManagedPosition,
+    PositionManager,
+    PositionStore,
+)
 
 logger = logging.getLogger("trading_agent")
 
@@ -85,6 +90,14 @@ class TradingAgent:
         # Layer 3 terminal dash reads state file).
         self.state_store = StateStore(log_dir=settings.LOG_DIR)
         self.notifier = TelegramNotifier()
+        # Stateful P9 position manager (scale-outs, dynamic stops, time exit).
+        self.position_manager = PositionManager(
+            scale1_r=settings.SCALE_OUT_1_R, scale2_r=settings.SCALE_OUT_2_R,
+            scale_fraction=settings.SCALE_OUT_FRACTION, breakeven_r=settings.BREAKEVEN_R,
+            trail_r=settings.TRAIL_R, time_exit_bars=settings.TIME_EXIT_BARS,
+            time_exit_min_r=settings.TIME_EXIT_MIN_R)
+        self.position_store = PositionStore(log_dir=settings.LOG_DIR)
+        self.managed: dict[str, ManagedPosition] = {}
         self._ml: dict[str, MLEnsemble] = {}     # per-symbol ensemble cache
         self._running = True
         self._open_risk: dict[str, float] = {}   # symbol -> intended dollar risk
@@ -122,6 +135,11 @@ class TradingAgent:
             self.notifier.error_alert(f"Startup: could not connect to Alpaca: {e}")
             logger.exception("Could not read starting account")
             eq = 0.0
+
+        # Reload any open positions' lifecycle state from before a restart.
+        self.managed = self.position_store.load()
+        if self.managed:
+            logger.info("Reloaded %d managed position(s) from disk", len(self.managed))
 
         self._start_streamlit()
         self.notifier.startup(mode, eq)
@@ -206,6 +224,8 @@ class TradingAgent:
 
         positions = self.broker.get_positions()
         open_symbols = {p.symbol for p in positions}
+        # P9: manage existing positions (scale-outs, dynamic stops, exits) first.
+        self._manage_positions(positions, equity)
         self._detect_closed_trades(positions, equity)
         held_closes = self._held_closes(open_symbols)
 
@@ -299,9 +319,90 @@ class TradingAgent:
                 target=plan.target, rr=plan.rr, score=score.total,
                 dollar_risk=trade.dollar_risk, risk_pct=fraction * 100,
                 regime=regime.label)
+            # Register with the stateful position manager (P9).
+            self.managed[symbol] = ManagedPosition.from_trade(
+                trade, score=score.total, atr=tech.values.get("atr14") or 0.0,
+                regime=regime.label, fractional=is_crypto(symbol),
+                entry_time=datetime.now(timezone.utc).isoformat())
+            self.position_store.save(self.managed)
         return dash_row
 
     # ------------------------------------------------------------------ #
+    # P9 stateful position management
+    # ------------------------------------------------------------------ #
+    def _manage_positions(self, positions, equity) -> None:
+        if not self.managed:
+            return
+        by_sym = {}
+        for p in positions:
+            by_sym[p.symbol] = p
+            by_sym[p.symbol.replace("/", "")] = p
+        for sym in list(self.managed.keys()):
+            mp = self.managed[sym]
+            pos = by_sym.get(sym) or by_sym.get(sym.replace("/", ""))
+            if pos is None:
+                # Gone from the broker -> its bracket stop/target filled.
+                self._finalize_external_close(mp, equity)
+                continue
+            try:
+                price = float(getattr(pos, "current_price", mp.entry) or mp.entry)
+            except (TypeError, ValueError):
+                price = mp.entry
+            for action in self.position_manager.update(mp, price, atr=mp.atr):
+                self._execute_action(mp, action, price)
+            if mp.status == "closed":
+                self._finalize_close(mp, equity)
+        self.position_store.save(self.managed)
+
+    def _execute_action(self, mp, a, price) -> None:
+        d = 1 if mp.side == "long" else -1
+        try:
+            if a.kind == "scale_out":
+                self.broker.scale_out(mp.symbol, mp.side, a.qty)
+                self.notifier.scaled_out(symbol=mp.symbol, tag=a.tag, qty=a.qty,
+                                         price=a.price, realized_pnl=a.realized_pnl,
+                                         remaining=mp.remaining_qty)
+            elif a.kind == "move_stop":
+                self.broker.replace_stop(mp.symbol, a.new_stop)
+                if a.tag == "breakeven":
+                    protected = max(0.0, d * (a.new_stop - mp.entry)) * mp.remaining_qty
+                    self.notifier.stop_breakeven(symbol=mp.symbol, new_stop=a.new_stop,
+                                                 protected_pnl=protected)
+                else:
+                    profit = d * (price - mp.entry) * mp.remaining_qty
+                    self.notifier.trailing_moved(symbol=mp.symbol, new_stop=a.new_stop,
+                                                 current_profit=profit)
+            elif a.kind == "time_exit":
+                self.broker.close_position(mp.symbol)
+            # close_hit: the broker bracket already executed the fill.
+        except Exception:
+            logger.exception("Executing %s action for %s failed", a.kind, mp.symbol)
+
+    def _finalize_close(self, mp, equity) -> None:
+        rr = mp.realized_r
+        self.notifier.trade_closed(symbol=mp.symbol, side=mp.side, pnl=mp.realized_pnl,
+                                   rr_achieved=rr, equity_after=equity)
+        self.portfolio.record_trade_result(mp.realized_pnl)
+        self._closed_today.append({"symbol": mp.symbol, "pnl": round(mp.realized_pnl, 2),
+                                   "r_multiple": round(rr, 2)})
+        self._open_risk.pop(mp.symbol, None)
+        self.managed.pop(mp.symbol, None)
+
+    def _finalize_external_close(self, mp, equity) -> None:
+        """A managed position vanished from the broker — its bracket leg filled.
+
+        We don't get the exact fill, so estimate: assume the target if price was
+        within reach of it, else the current (possibly trailed) stop.
+        """
+        d = 1 if mp.side == "long" else -1
+        target_r = d * (mp.target - mp.entry) / mp.risk_per_share if mp.risk_per_share else 0
+        close_px = mp.target if mp.last_r >= target_r * 0.9 else mp.current_stop
+        mp.realized_pnl += d * (close_px - mp.entry) * mp.remaining_qty
+        mp.remaining_qty = 0
+        mp.status = "closed"
+        logger.info("%s: reconciled external close ~$%.2f (estimated)", mp.symbol, close_px)
+        self._finalize_close(mp, equity)
+
     def _ml_predict(self, symbol, df):
         if not settings.ML_ENABLED:
             return None
@@ -356,12 +457,20 @@ class TradingAgent:
     # ------------------------------------------------------------------ #
     def _write_state(self, positions, scores, equity, buying_power, sentiment) -> None:
         st = self._build_state(positions, scores, equity, buying_power, sentiment)
+        managed = [{
+            "symbol": mp.symbol, "side": mp.side, "entry": mp.entry,
+            "current_stop": mp.current_stop, "target": mp.target,
+            "remaining_qty": mp.remaining_qty, "realized_pnl": round(mp.realized_pnl, 2),
+            "last_r": round(mp.last_r, 2), "bars_held": mp.bars_held,
+            "tranches": mp.tranches_taken, "breakeven": mp.breakeven_done,
+            "trailing": mp.trailing_active, "score": mp.score, "regime": mp.regime,
+        } for mp in self.managed.values()]
         self.state_store.write_state({
             "equity": st.equity, "buying_power": st.buying_power,
             "daily_pnl": st.daily_pnl, "weekly_pnl": st.weekly_pnl,
             "risk_state": st.risk_state, "halted": st.halted,
             "open_positions": st.open_positions, "scores": st.scores,
-            "closed_today": st.closed_today,
+            "closed_today": st.closed_today, "managed": managed,
         })
 
     def _detect_closed_trades(self, positions, equity) -> None:
@@ -377,6 +486,8 @@ class TradingAgent:
             except (TypeError, ValueError):
                 current[p.symbol] = 0.0
         for sym in set(self._pos_pnl) - set(current):
+            if sym in self.managed:
+                continue   # exact close handled by the position manager
             pnl = self._pos_pnl.get(sym, 0.0)
             risk = self._open_risk.get(sym) or abs(pnl) or 1.0
             rr = pnl / risk if risk else 0.0

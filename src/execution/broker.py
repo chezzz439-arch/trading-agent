@@ -225,6 +225,23 @@ class Broker:
             logger.exception("replace_stop failed for %s", symbol)
             return False
 
+    def scale_out(self, symbol: str, side: str, qty: float) -> Any | None:
+        """Reduce a position by ``qty`` with a market order (partial profit take).
+
+        Sells to reduce a long, buys to reduce a short.
+        """
+        try:
+            reduce_side = OrderSide.SELL if side == "long" else OrderSide.BUY
+            tif = TimeInForce.GTC if _is_crypto(symbol) else TimeInForce.DAY
+            order = MarketOrderRequest(symbol=symbol, qty=qty, side=reduce_side,
+                                       time_in_force=tif)
+            result = self._client.submit_order(order)
+            logger.info("%s: scaled out %s (order %s)", symbol, qty, result.id)
+            return result
+        except Exception:
+            logger.exception("scale_out failed for %s", symbol)
+            return None
+
     def close_position(self, symbol: str) -> bool:
         """Close a single position (used by the time-based exit)."""
         try:
