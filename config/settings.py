@@ -51,8 +51,7 @@ RR_RATIO: float = 5.0              # minimum acceptable reward:risk
 ATR_PERIOD: int = 14
 ATR_MULTIPLIER: float = 1.5        # stop distance = ATR * multiplier
 SWING_LOOKBACK: int = 100          # bars scanned for structural path veto
-RR_PATH_VETO: bool = False         # DEMO: relaxed so constructed 5:1 targets trade
-                                   # (set True to require a clear structural path)
+RR_PATH_VETO: bool = True          # require a clear structural path to the target
 
 # --------------------------------------------------------------------------- #
 # Per-trade risk / position sizing
@@ -63,7 +62,7 @@ MAX_POSITION_PCT: float = 0.10     # cap a single position at 10% of equity
 # --------------------------------------------------------------------------- #
 # Portfolio risk
 # --------------------------------------------------------------------------- #
-MAX_CONCURRENT_POSITIONS: int = 1  # DEMO: one position to watch (normally 3)
+MAX_CONCURRENT_POSITIONS: int = 3
 DAILY_LOSS_LIMIT: float = 0.03      # kill switch at -3% from day-start equity
 WEEKLY_LOSS_LIMIT: float = 0.07     # kill switch at -7% from week-start equity
 MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
@@ -73,7 +72,7 @@ PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 60.0            # minimum 0-100 score required to trade (demo: lowered from 70)
+MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
 
