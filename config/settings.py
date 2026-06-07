@@ -163,6 +163,18 @@ OPTIONS_EXPIRY_EXIT_DAYS: int = 1    # close at <= N days to expiration (avoid w
 RESEARCH_ENABLED: bool = True
 
 # --------------------------------------------------------------------------- #
+# v2 edge-validated changes (merged from research 2026-06-07)
+# --------------------------------------------------------------------------- #
+# Hybrid target: aim at swing structure when it yields >= RR_RATIO, else the
+# constructed ATR target; structure is a confirmation bonus, never a hard veto.
+# Validated: only hybrid configs showed significant expectancy (perm-p ~0.03).
+HYBRID_TARGET_ENABLED: bool = True
+# Long-only: skip all short entries. Research (172 names, 4y) showed shorts were
+# pure drag (-27.8R, 13% win) while longs carry the edge (+0.455R/trade, perm-p
+# 0.001). Crypto is long-only on Alpaca regardless.
+LONG_ONLY: bool = True
+
+# --------------------------------------------------------------------------- #
 # Monitoring
 # --------------------------------------------------------------------------- #
 STREAMLIT_AUTOSTART: bool = True   # launch the Streamlit dashboard from main.py

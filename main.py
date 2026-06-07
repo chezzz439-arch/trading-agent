@@ -90,7 +90,8 @@ class TradingAgent:
         self.rr_filter = RRFilter(rr_ratio=settings.RR_RATIO, atr_period=settings.ATR_PERIOD,
                                   atr_multiplier=settings.ATR_MULTIPLIER,
                                   swing_lookback=settings.SWING_LOOKBACK,
-                                  path_veto=settings.RR_PATH_VETO)
+                                  path_veto=settings.RR_PATH_VETO,
+                                  hybrid=settings.HYBRID_TARGET_ENABLED)
         self.portfolio = PortfolioRisk(
             max_positions=settings.MAX_CONCURRENT_POSITIONS,
             daily_loss_limit=settings.DAILY_LOSS_LIMIT,
@@ -377,6 +378,8 @@ class TradingAgent:
         if tech is None or tech.trend_bias == "neutral":
             return None
         side = tech.trend_bias
+        if settings.LONG_ONLY and side == "short":
+            return None          # long-only: shorts were pure drag in research
         pre_score = self.scorer.prerank_score(symbol, side, tech)
         return {"symbol": symbol, "df": df, "tech": tech, "side": side,
                 "pre_score": pre_score}

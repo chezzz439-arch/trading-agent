@@ -39,6 +39,8 @@ class TradePlan:
     risk_per_share: float
     atr: float
     reason: str
+    target_kind: str = "constructed"   # "structure" | "constructed" (hybrid)
+    path_clear: bool = True            # no swing level between entry and target (bonus)
 
 
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -75,6 +77,7 @@ class RRFilter:
         atr_multiplier: float = 1.5,
         swing_lookback: int = 100,
         path_veto: bool = True,
+        hybrid: bool = False,
     ) -> None:
         if rr_ratio <= 0 or atr_multiplier <= 0:
             raise ValueError("rr_ratio and atr_multiplier must be positive")
@@ -85,9 +88,16 @@ class RRFilter:
         # When False, accept constructed 5:1 targets even if a swing level sits
         # in the path (looser; more trades, no structural confirmation).
         self.path_veto = path_veto
+        # Hybrid target (Phase 1.1): aim at the nearest swing structure when it
+        # yields >= rr_ratio, else fall back to the constructed ATR target.
+        # Structure is then a confirmation bonus (path_clear), never a veto, so
+        # every valid signal gets a valid target.
+        self.hybrid = hybrid
 
-    def evaluate(self, signal: Signal, df: pd.DataFrame) -> Optional[TradePlan]:
-        """Build a 5:1 TradePlan if the path to target is structurally clear."""
+    def evaluate(self, signal: Signal, df: pd.DataFrame,
+                 stop_widen: float = 1.0) -> Optional[TradePlan]:
+        """Build a TradePlan. ``stop_widen`` (>=1) widens the ATR stop distance —
+        e.g. 1.5 in a high-VIX tape — keeping RR intact (sizing adjusts)."""
         try:
             if df is None or len(df) < self.atr_period + 1:
                 return None
@@ -97,25 +107,30 @@ class RRFilter:
                 return None
 
             entry = signal.entry_price
-            risk_distance = self.atr_multiplier * atr_val
-
-            # --- Constructed target at the configured reward:risk -------- #
-            if signal.side == "long":
-                stop = entry - risk_distance
-                target = entry + self.rr_ratio * risk_distance
-            elif signal.side == "short":
-                stop = entry + risk_distance
-                target = entry - self.rr_ratio * risk_distance
-            else:
+            risk_distance = self.atr_multiplier * atr_val * max(1.0, stop_widen)
+            if signal.side not in ("long", "short"):
                 return None
+            stop = entry - risk_distance if signal.side == "long" else entry + risk_distance
+
+            if self.hybrid:
+                target, target_kind, path_clear = self._hybrid_target(
+                    signal.side, df, entry, risk_distance)
+            else:
+                # --- Constructed target at the configured reward:risk ---- #
+                target = (entry + self.rr_ratio * risk_distance if signal.side == "long"
+                          else entry - self.rr_ratio * risk_distance)
+                target_kind, path_clear = "constructed", True
 
             entry, stop, target = _round(entry), _round(stop), _round(target)
             risk_per_share = abs(entry - stop)
             if risk_per_share <= 0 or stop <= 0 or target <= 0:
                 return None
 
-            # --- Secondary confirmation: structural path must be clear --- #
-            if self.path_veto and not self._path_is_clear(signal.side, df, entry, target):
+            # --- Legacy hard veto (only when NOT hybrid) ----------------- #
+            # Hybrid never vetoes — structure is folded into the target and the
+            # path_clear flag instead, so every valid signal yields a plan.
+            if not self.hybrid and self.path_veto and \
+                    not self._path_is_clear(signal.side, df, entry, target):
                 logger.info(
                     "%s: rejected, structural resistance/support blocks path "
                     "to target (entry=%.2f target=%.2f)",
@@ -134,10 +149,45 @@ class RRFilter:
                 risk_per_share=round(risk_per_share, 4),
                 atr=round(atr_val, 4),
                 reason=signal.reason,
+                target_kind=target_kind,
+                path_clear=path_clear,
             )
         except Exception:
             logger.exception("RRFilter.evaluate failed for %s", getattr(signal, "symbol", "?"))
             return None
+
+    def _hybrid_target(
+        self, side: str, df: pd.DataFrame, entry: float, risk_distance: float
+    ) -> tuple[float, str, bool]:
+        """Pick a target: nearest swing structure if it yields >= rr_ratio, else
+        the constructed ATR target. Returns (target, kind, path_clear).
+
+        ``path_clear`` is True when no swing level sits strictly between entry and
+        the chosen target — a confirmation bonus the scorer can reward, not a veto.
+        """
+        constructed = (entry + self.rr_ratio * risk_distance if side == "long"
+                       else entry - self.rr_ratio * risk_distance)
+        structure = df.iloc[:-1] if len(df) > 1 else df
+        window = structure.tail(self.swing_lookback)
+        if window.empty or risk_distance <= 0:
+            return constructed, "constructed", True
+
+        if side == "long":
+            level = float(window["high"].max())          # nearest overhead resistance
+            reaches = level > entry and (level - entry) / risk_distance >= self.rr_ratio
+            if reaches:
+                # structure far enough to be the target; path clear by construction
+                return level, "structure", True
+            # fall back beyond the (too-close) resistance; note the obstacle
+            path_clear = not (entry < level < constructed)
+            return constructed, "constructed", path_clear
+        else:  # short
+            level = float(window["low"].min())           # nearest support below
+            reaches = level < entry and (entry - level) / risk_distance >= self.rr_ratio
+            if reaches:
+                return level, "structure", True
+            path_clear = not (constructed < level < entry)
+            return constructed, "constructed", path_clear
 
     def _path_is_clear(
         self, side: str, df: pd.DataFrame, entry: float, target: float
