@@ -72,7 +72,7 @@ PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade
+MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade (matches the score-70 OOS validation)
 PRERANK_TOP_N: int = 20            # deep-analyze only the top-N pre-ranked names/scan
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
