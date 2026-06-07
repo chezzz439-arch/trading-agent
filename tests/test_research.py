@@ -122,6 +122,27 @@ def test_crypto_short_circuits():
     assert r.source_status.get("news") == "n/a"
 
 
+# --- side-aware applied points -------------------------------------------- #
+def test_applied_points_long_unchanged():
+    r = engine(ins(20), an(8), nw(8, label="positive"), so(6)).analyze("X")
+    assert r.total_points == 25
+    assert r.applied_points("long") == 25
+
+
+def test_applied_points_short_flips_sign():
+    # bullish research (+25) should PENALISE a short by 25
+    r = engine(ins(20), an(8), nw(8, label="positive"), so(6)).analyze("X")
+    assert r.applied_points("short") == -25
+
+
+def test_applied_points_bearish_helps_short():
+    # bearish research (-18) helps a short (+18) and hurts a long (-18)
+    r = engine(ins(-10), an(-5), nw(-3, label="negative"), so(0)).analyze("X")
+    assert r.total_points == -18
+    assert r.applied_points("long") == -18
+    assert r.applied_points("short") == 18
+
+
 # --- earnings info --------------------------------------------------------- #
 def test_earnings_flags():
     assert EarningsInfo(days_to=2).within3 and EarningsInfo(days_to=2).within7

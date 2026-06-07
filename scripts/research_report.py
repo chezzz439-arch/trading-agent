@@ -81,7 +81,8 @@ def scorer_view(sym, engine, feed, tech, quant, regime_d, scorer, rr):
     full = scorer.score(sym, side, technical=t, quant=q, regime=reg, plan=plan, research=res)
     print(f"   side: {side.upper()}")
     print(f"   technical-only total: {base.total:.1f}")
-    print(f"   + research {res.total_points:+d}  ->  TOTAL {full.total:.1f}/100   "
+    print(f"   + research {res.applied_points(side):+d} (raw {res.total_points:+d}, "
+          f"side-aware)  ->  TOTAL {full.total:.1f}/100   "
           f"(gate {settings.MIN_SCORE:.0f} -> {'PASS' if full.passed else 'blocked'})")
     print(f"   breakdown: {full.breakdown}")
 
@@ -112,17 +113,18 @@ def scan_top5(engine, feed, tech, quant, regime_d, scorer, rr):
         plan = rr.evaluate(sig, df)
         res = engine.analyze(s)
         sc = scorer.score(s, side, technical=t, quant=q, regime=reg, plan=plan, research=res)
-        base = sc.total - res.total_points
+        applied = res.applied_points(side)
+        base = sc.total - applied
         ok, why = res.allows(side)
-        rows.append((sc.total, s, side, base, res, ok, why))
+        rows.append((sc.total, s, side, base, applied, res, ok, why))
     rows.sort(reverse=True, key=lambda x: x[0])
-    print(f"\n{'SYM':6} {'SIDE':5} {'TECH':>5} {'RSCH':>5} {'TOTAL':>6}  RESEARCH SUMMARY")
-    for total, s, side, base, res, ok, why in rows[:5]:
+    print(f"\n{'SYM':6} {'SIDE':5} {'TECH':>5} {'RSCH':>5} {'TOTAL':>6}  RESEARCH SUMMARY (side-aware RSCH)")
+    for total, s, side, base, applied, res, ok, why in rows[:5]:
         arrow = "↑" if side == "long" else "↓"
         veto = "" if ok else f"  ⛔ {why}"
         ins = res.insider.emoji if res.insider else "⚪"
         an = res.analyst.rating if res.analyst else "N/A"
-        print(f"{s:6} {arrow}{side[:4]:4} {base:5.1f} {res.total_points:+5d} {total:6.1f}  "
+        print(f"{s:6} {arrow}{side[:4]:4} {base:5.1f} {applied:+5d} {total:6.1f}  "
               f"🏦{ins} 👔{an} 📰{res.news.emoji if res.news else '⚪'} "
               f"💬{res.social.bull_pct:.0f}%{veto}")
 

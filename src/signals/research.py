@@ -77,6 +77,16 @@ class ResearchReport:
             "earnings": self.earnings_points,
         }
 
+    def applied_points(self, side: str) -> int:
+        """Side-aware score contribution.
+
+        ``total_points`` is a *bullishness* score (insider buying, Buy ratings,
+        positive news, bullish social all push it up). For a LONG that's applied
+        as-is; for a SHORT the sign is flipped, so bullish research penalises a
+        short and bearish research strengthens it.
+        """
+        return -self.total_points if side == "short" else self.total_points
+
     def allows(self, side: str) -> tuple[bool, str]:
         """Whether a trade on ``side`` ("long"/"short") is permitted."""
         if self.block_trade:

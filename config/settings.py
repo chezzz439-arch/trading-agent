@@ -88,7 +88,7 @@ LOOKBACK_BARS: int = 300                   # bars pulled per request
 # --------------------------------------------------------------------------- #
 # Run loop / logging
 # --------------------------------------------------------------------------- #
-SCAN_INTERVAL: int = 180           # seconds between scans (3 minutes)
+SCAN_INTERVAL: int = 240           # seconds between scans (4 min — headroom for research caches warming)
 LOG_DIR: str = "logs"
 
 # --------------------------------------------------------------------------- #

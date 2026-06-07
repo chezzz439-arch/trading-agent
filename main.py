@@ -405,13 +405,14 @@ class TradingAgent:
         score = self.scorer.score(symbol, side, technical=tech, quant=quant,
                                   regime=regime, mtf=mtf, ml=ml_pred, plan=plan,
                                   research=research)
-        tech_score = score.total - research.total_points   # base, for reporting
+        applied = research.applied_points(side)            # side-aware contribution
+        tech_score = score.total - applied                 # base, for reporting
 
         if research.source_status:
             self._source_status = research.source_status
         self._research_view[symbol] = self._research_card(research)
         dash_row = {"symbol": symbol, "side": side, "score": score.total,
-                    "passed": score.passed, "research": research.total_points}
+                    "passed": score.passed, "research": applied}
         # High-score watch alert: 80+ that won't actually trade (no plan / gate).
         if score.total >= 80 and (not score.passed or plan is None):
             self.dashboard.alert("high_score", f"{symbol} {side} scored {score.total:.0f}")
@@ -482,7 +483,7 @@ class TradingAgent:
                 self.notifier.trade_opened_research(
                     symbol=symbol, side=side, entry=plan.entry, stop=plan.stop,
                     target=plan.target, rr=plan.rr, tech_score=tech_score,
-                    research_bonus=research.total_points, total=score.total,
+                    research_bonus=applied, total=score.total,
                     research_lines=research.summary_lines())
             else:
                 self.notifier.trade_opened(

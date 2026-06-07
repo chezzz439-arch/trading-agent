@@ -90,9 +90,11 @@ class MasterScorer:
         b["ml"] = self._ml(side, ml, s)
         b["risk_reward"] = self._risk_reward(plan, s)
         # Research is additive to the technical score and already clamped to
-        # +/-25 by the ResearchEngine. Live-only (None in backtest -> 0). The
-        # final total is bounded to [0, 100].
-        b["research"] = float(getattr(research, "total_points", 0) or 0)
+        # +/-25 by the ResearchEngine. It's side-aware: a bullishness score added
+        # for longs, sign-flipped for shorts. Live-only (None in backtest -> 0).
+        # The final total is bounded to [0, 100].
+        _ap = getattr(research, "applied_points", None)
+        b["research"] = float(_ap(side)) if callable(_ap) else 0.0
         s.total = round(min(100.0, max(0.0, sum(b.values()))), 1)
         return s
 
