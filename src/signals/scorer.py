@@ -78,6 +78,7 @@ class MasterScorer:
         mtf: Optional[MTFResult] = None,
         ml: Optional[MLPrediction] = None,
         plan: Optional[TradePlan] = None,
+        research: object = None,
     ) -> TradeScore:
         s = TradeScore(symbol=symbol, side=side, min_score=self.min_score)
         b = s.breakdown
@@ -88,7 +89,11 @@ class MasterScorer:
         b["regime"] = self._regime(side, regime, s)
         b["ml"] = self._ml(side, ml, s)
         b["risk_reward"] = self._risk_reward(plan, s)
-        s.total = round(sum(b.values()), 1)
+        # Research is additive to the technical score and already clamped to
+        # +/-25 by the ResearchEngine. Live-only (None in backtest -> 0). The
+        # final total is bounded to [0, 100].
+        b["research"] = float(getattr(research, "total_points", 0) or 0)
+        s.total = round(min(100.0, max(0.0, sum(b.values()))), 1)
         return s
 
     # ------------------------------------------------------------------ #

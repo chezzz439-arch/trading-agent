@@ -34,6 +34,7 @@ from src.signals.mtf import MTFConfluence
 from src.signals.quant import QuantAnalysis
 from src.signals.regime import RegimeDetector
 from src.signals.rr_filter import RRFilter
+from src.signals.research import ResearchEngine
 from src.signals.scorer import MasterScorer
 from src.signals.sentiment import SentimentAnalyzer
 from src.signals.strategy import Signal
@@ -44,6 +45,13 @@ from src.execution.position_manager import (
     ManagedPosition,
     PositionManager,
     PositionStore,
+)
+from src.signals.options_strategy import (
+    OptionPosition,
+    OptionPositionStore,
+    OptionsStrategy,
+    crossed_up50,
+    exit_decision,
 )
 
 logger = logging.getLogger("trading_agent")
@@ -73,6 +81,12 @@ class TradingAgent:
                                  lookback=settings.LOOKBACK_BARS,
                                  min_confluence=settings.MIN_CONFLUENCE)
         self.scorer = MasterScorer(min_score=settings.MIN_SCORE, rr_target=settings.RR_RATIO)
+        # Research layer (insider/analyst/news/social + earnings). Error-safe;
+        # contributes a clamped +/-25 to the score and can veto/size trades.
+        self.research = ResearchEngine(enabled=settings.RESEARCH_ENABLED)
+        self._source_status: dict = {}            # last seen per-source health
+        self._research_view: dict[str, dict] = {} # symbol -> compact research for dashboard
+        self._earnings_warned: dict[str, str] = {}  # symbol -> date warned
         self.rr_filter = RRFilter(rr_ratio=settings.RR_RATIO, atr_period=settings.ATR_PERIOD,
                                   atr_multiplier=settings.ATR_MULTIPLIER,
                                   swing_lookback=settings.SWING_LOOKBACK,
@@ -107,6 +121,22 @@ class TradingAgent:
             time_exit_min_r=settings.TIME_EXIT_MIN_R)
         self.position_store = PositionStore(log_dir=settings.LOG_DIR)
         self.managed: dict[str, ManagedPosition] = {}
+        # Options (opt-in): route strong (>= OPTIONS_MIN_SCORE) signals to long
+        # calls/puts instead of stock. Disabled -> the bot trades equities only.
+        self.options: OptionsStrategy | None = None
+        self.option_positions: dict[str, OptionPosition] = {}
+        self.option_store = OptionPositionStore(log_dir=settings.LOG_DIR)
+        self._option_live: dict[str, dict] = {}   # OCC symbol -> live premium/value
+        if settings.OPTIONS_ENABLED:
+            self.options = OptionsStrategy(
+                k, s, paper=settings.PAPER,
+                dte_min=settings.OPTIONS_DTE_MIN, dte_max=settings.OPTIONS_DTE_MAX,
+                risk_pct=settings.OPTIONS_RISK_PCT,
+                profit_target=settings.OPTIONS_PROFIT_TARGET,
+                stop_loss=settings.OPTIONS_STOP_LOSS,
+                max_positions=settings.OPTIONS_MAX_POSITIONS,
+                skip_earnings=settings.OPTIONS_SKIP_EARNINGS,
+                expiry_exit_days=settings.OPTIONS_EXPIRY_EXIT_DAYS)
         self._ml: dict[str, MLEnsemble] = {}     # per-symbol ensemble cache
         self._running = True
         self._open_risk: dict[str, float] = {}   # symbol -> intended dollar risk
@@ -150,6 +180,17 @@ class TradingAgent:
         self.managed = self.position_store.load()
         if self.managed:
             logger.info("Reloaded %d managed position(s) from disk", len(self.managed))
+        # Restore the portfolio-heat counter from reloaded positions, otherwise a
+        # restart resets open risk to zero and the heat cap stops protecting until
+        # positions re-enter (which let the weekend order-pileup happen).
+        for sym, mp in self.managed.items():
+            self._open_risk[sym] = mp.risk_per_share * mp.initial_qty
+        if self.options is not None:
+            self.option_positions = self.option_store.load()
+            for op in self.option_positions.values():
+                self._open_risk[op.symbol] = op.cost_basis
+            logger.info("Options ENABLED | gate>=%.0f | reloaded %d option position(s)",
+                        settings.OPTIONS_MIN_SCORE, len(self.option_positions))
 
         self._start_streamlit()
         self.notifier.startup(mode, eq)
@@ -238,9 +279,26 @@ class TradingAgent:
         # P9: manage existing positions (scale-outs, dynamic stops, exits) first.
         self._manage_positions(positions, equity)
         self._detect_closed_trades(positions, equity)
+        # Options lifecycle (opt-in): re-price open options, take profit / stop /
+        # expiry exits, and fire milestone alerts.
+        self._manage_options(equity)
+        # Ensure every held position contributes to the portfolio-heat counter,
+        # including ones not tracked by the position manager (pre-existing).
+        self._sync_held_risk(positions, equity)
+        self._check_earnings_warnings(positions)
+        total_risk = sum(self._open_risk.values())
+        logger.info("Portfolio heat: $%.0f / $%.0f (%.1f%%) across %d position(s)",
+                    total_risk, equity * settings.PORTFOLIO_HEAT_MAX,
+                    (total_risk / equity * 100) if equity else 0.0,
+                    len(self._open_risk))
         held_closes = self._held_closes(open_symbols)
 
         order_syms = self.broker.open_order_symbols()
+        # Pending entry orders must count toward the position cap too — otherwise
+        # (especially when nothing fills, e.g. weekends) the agent keeps queuing
+        # past MAX_CONCURRENT_POSITIONS because only *filled* positions are
+        # counted. ``committed`` = held positions + symbols with a working order.
+        committed = set(open_symbols) | set(order_syms)
 
         # --- Tiered selection: scan hot names every cycle, cool ones less --- #
         # (pre-rank score is 0-35; ~21 ≈ "60+", ~14 ≈ "40+"). Open positions and
@@ -280,7 +338,7 @@ class TradingAgent:
         scores_for_dash = []
         for c in top:
             try:
-                row = self._full_evaluate(c, equity, open_symbols, held_closes,
+                row = self._full_evaluate(c, equity, committed, held_closes,
                                           sentiment, spy_df)
                 if row is not None:
                     scores_for_dash.append(row)
@@ -323,9 +381,13 @@ class TradingAgent:
         return {"symbol": symbol, "df": df, "tech": tech, "side": side,
                 "pre_score": pre_score}
 
-    def _full_evaluate(self, c, equity, open_symbols, held_closes, sentiment, spy_df):
+    def _full_evaluate(self, c, equity, committed, held_closes, sentiment, spy_df):
         """Expensive pass on a pre-ranked candidate: quant/regime/MTF/ML -> score
-        -> risk gates -> sized entry. Reuses the candidate's df + technical."""
+        -> risk gates -> sized entry. Reuses the candidate's df + technical.
+
+        ``committed`` = held positions + symbols with a working order; its length
+        is what the position cap is checked against, and a new entry is added to
+        it so later candidates in the same scan see the higher count."""
         symbol, df, tech, side = c["symbol"], c["df"], c["tech"], c["side"]
 
         # ---- Phases 2-6 ------------------------------------------------- #
@@ -334,16 +396,22 @@ class TradingAgent:
                                              spy_df=spy_df if not spy_df.empty else None)
         mtf = self.mtf.analyze(symbol)
         ml_pred = self._ml_predict(symbol, df)
+        research = self.research.analyze(symbol)   # error-safe; neutral if disabled
 
         # ---- RR plan + Phase 7 score ------------------------------------ #
         sig = Signal(symbol, side, float(df["close"].iloc[-1]),
                      tech.values.get("rsi14") or 50.0, df.index[-1], tech.trend_bias)
         plan = self.rr_filter.evaluate(sig, df)
         score = self.scorer.score(symbol, side, technical=tech, quant=quant,
-                                  regime=regime, mtf=mtf, ml=ml_pred, plan=plan)
+                                  regime=regime, mtf=mtf, ml=ml_pred, plan=plan,
+                                  research=research)
+        tech_score = score.total - research.total_points   # base, for reporting
 
+        if research.source_status:
+            self._source_status = research.source_status
+        self._research_view[symbol] = self._research_card(research)
         dash_row = {"symbol": symbol, "side": side, "score": score.total,
-                    "passed": score.passed}
+                    "passed": score.passed, "research": research.total_points}
         # High-score watch alert: 80+ that won't actually trade (no plan / gate).
         if score.total >= 80 and (not score.passed or plan is None):
             self.dashboard.alert("high_score", f"{symbol} {side} scored {score.total:.0f}")
@@ -353,10 +421,24 @@ class TradingAgent:
         if not score.passed or plan is None:
             return dash_row
 
+        # ---- Research vetoes (block long/short/trade) ------------------- #
+        ok, why = research.allows(side)
+        if not ok:
+            logger.info("%s: blocked by research: %s", symbol, why)
+            return dash_row
+
+        # ---- Options routing (opt-in): strong signal -> long call/put --- #
+        # A qualifying signal buys an ATM option instead of the stock. If no
+        # viable/affordable contract exists, fall through to the equity path so
+        # the signal isn't wasted.
+        if self.options is not None and score.total >= settings.OPTIONS_MIN_SCORE:
+            if self._maybe_enter_option(symbol, side, df, score.total, equity):
+                return dash_row
+
         # ---- Phase 8: risk gates + sizing ------------------------------- #
         corr = self.portfolio.max_candidate_correlation(df["close"], held_closes)
         decision = self.portfolio.pre_trade_check(
-            score.total, plan.rr, len(open_symbols), candidate_corr=corr,
+            score.total, plan.rr, len(committed), candidate_corr=corr,
             current_equity=equity)
         if not decision.allowed:
             logger.info("%s: blocked by risk: %s", symbol, decision.reasons)
@@ -373,6 +455,11 @@ class TradingAgent:
                                                   regime.volatility, corr)
         if m.get("size_override"):   # e.g. meme coins use a smaller fraction
             fraction = min(fraction, float(m["size_override"]))
+        # Research size factor: halve near earnings (<=7d) and/or on a social
+        # volume spike (e.g. 1% -> 0.5%, or 0.25% if both).
+        if research.size_factor != 1.0:
+            logger.info("%s: research size factor %.2f applied", symbol, research.size_factor)
+            fraction *= research.size_factor
         sizer = PositionSizer(risk_per_trade=fraction, max_position_pct=settings.MAX_POSITION_PCT)
         trade = sizer.size(plan, equity, fractional=is_crypto(symbol))
         if trade is None:
@@ -387,15 +474,22 @@ class TradingAgent:
         order = self.broker.place_smart_entry(trade, regime_label=regime.label,
                                               limit_price=limit_px)
         if order is not None:
-            open_symbols.add(symbol)
+            committed.add(symbol)
             self._open_risk[symbol] = trade.dollar_risk
             logger.info("%s: ENTERED score=%.0f rr=%.1f risk=$%.2f frac=%.3f%%",
                         symbol, score.total, plan.rr, trade.dollar_risk, fraction * 100)
-            self.notifier.trade_opened(
-                symbol=symbol, side=side, entry=plan.entry, stop=plan.stop,
-                target=plan.target, rr=plan.rr, score=score.total,
-                dollar_risk=trade.dollar_risk, risk_pct=fraction * 100,
-                regime=regime.label)
+            if settings.RESEARCH_ENABLED:
+                self.notifier.trade_opened_research(
+                    symbol=symbol, side=side, entry=plan.entry, stop=plan.stop,
+                    target=plan.target, rr=plan.rr, tech_score=tech_score,
+                    research_bonus=research.total_points, total=score.total,
+                    research_lines=research.summary_lines())
+            else:
+                self.notifier.trade_opened(
+                    symbol=symbol, side=side, entry=plan.entry, stop=plan.stop,
+                    target=plan.target, rr=plan.rr, score=score.total,
+                    dollar_risk=trade.dollar_risk, risk_pct=fraction * 100,
+                    regime=regime.label)
             # Register with the stateful position manager (P9).
             self.managed[symbol] = ManagedPosition.from_trade(
                 trade, score=score.total, atr=tech.values.get("atr14") or 0.0,
@@ -490,6 +584,113 @@ class TradingAgent:
         logger.info("%s: reconciled external close ~$%.2f (estimated)", mp.symbol, close_px)
         self._finalize_close(mp, equity)
 
+    # ------------------------------------------------------------------ #
+    # Options (opt-in) — entry routing + lifecycle management
+    # ------------------------------------------------------------------ #
+    def _maybe_enter_option(self, symbol, side, df, score, equity) -> bool:
+        """Try to express a strong signal as a long call/put. Returns True on entry."""
+        if is_crypto(symbol):
+            return False
+        if len(self.option_positions) >= settings.OPTIONS_MAX_POSITIONS:
+            logger.info("%s: option skipped — at max %d option positions",
+                        symbol, settings.OPTIONS_MAX_POSITIONS)
+            return False
+        if any(op.underlying == symbol for op in self.option_positions.values()):
+            return False   # already have an option on this underlying
+
+        price = float(df["close"].iloc[-1])
+        plan = self.options.plan_trade(symbol, side, price, equity, score)
+        if plan is None:
+            return False
+        q = plan.quote
+        order = self.broker.buy_option(q.symbol, plan.contracts)
+        if order is None:
+            return False
+
+        op = OptionPosition(
+            symbol=q.symbol, underlying=symbol, type=q.type, strike=q.strike,
+            expiration=q.expiration, contracts=plan.contracts,
+            premium_paid=q.premium, cost_basis=plan.cost, side_bias=plan.side_bias,
+            score=score, target_premium=plan.target_premium,
+            stop_premium=plan.stop_premium,
+            entry_time=datetime.now(timezone.utc).isoformat())
+        self.option_positions[q.symbol] = op
+        self.option_store.save(self.option_positions)
+        self._open_risk[q.symbol] = plan.cost   # premium is the defined risk
+        logger.info("%s: OPTION ENTERED %s %s x%d @ $%.2f cost=$%.0f score=%.0f — %s",
+                    symbol, q.type.upper(), q.symbol, plan.contracts, q.premium,
+                    plan.cost, score, plan.description)
+        self.notifier.option_bought(
+            underlying=symbol, opt_type=q.type, strike=q.strike,
+            expiration=q.expiration, contracts=plan.contracts,
+            premium_paid=q.premium, cost=plan.cost, description=plan.description)
+        return True
+
+    def _manage_options(self, equity) -> None:
+        if self.options is None or not self.option_positions:
+            return
+        broker_opts = {p.symbol: p for p in self.broker.get_option_positions()}
+        self._option_live = {}
+        for sym in list(self.option_positions.keys()):
+            op = self.option_positions[sym]
+            bpos = broker_opts.get(sym)
+            if bpos is None:
+                # Vanished from the broker: settled. If we're at/after expiry it
+                # expired worthless; otherwise treat as an external close at $0.
+                self._finalize_option(op, current_premium=0.0, equity=equity,
+                                      action="expiry", reason="Expired worthless")
+                continue
+            # Alpaca reports option current_price as the per-share premium.
+            try:
+                cur = float(getattr(bpos, "current_price", 0) or 0)
+            except (TypeError, ValueError):
+                cur = 0.0
+            if cur <= 0:
+                cur = self.options.current_premium(sym) or op.premium_paid
+            value = cur * 100 * op.contracts
+            pnl = (cur - op.premium_paid) * 100 * op.contracts
+            self._option_live[sym] = {"current_premium": cur, "value": value, "pnl": pnl}
+
+            # Milestone: first time up >= 50%.
+            if crossed_up50(op, cur):
+                self.notifier.option_up(underlying=op.underlying, opt_type=op.type,
+                                        strike=op.strike, current_value=value, profit=pnl)
+                op.up50_alerted = True
+
+            action, reason = exit_decision(
+                op, cur, profit_target=settings.OPTIONS_PROFIT_TARGET,
+                stop_loss=settings.OPTIONS_STOP_LOSS,
+                expiry_exit_days=settings.OPTIONS_EXPIRY_EXIT_DAYS)
+            if action != "hold":
+                self.broker.close_option(sym)
+                self._finalize_option(op, current_premium=cur, equity=equity,
+                                      action=action, reason=reason)
+        self.option_store.save(self.option_positions)
+
+    def _finalize_option(self, op, current_premium, equity, action, reason) -> None:
+        pnl = (current_premium - op.premium_paid) * 100 * op.contracts
+        value = current_premium * 100 * op.contracts
+        if action == "take_profit":
+            self.notifier.option_doubled(underlying=op.underlying, opt_type=op.type,
+                                         strike=op.strike, sold_value=value, profit=pnl)
+        elif action == "expiry" and current_premium <= 0:
+            self.notifier.option_expired(underlying=op.underlying, opt_type=op.type,
+                                         strike=op.strike, loss=op.cost_basis)
+        else:
+            self.notifier.option_closed(underlying=op.underlying, opt_type=op.type,
+                                        strike=op.strike, reason=reason, pnl=pnl)
+        self.portfolio.record_trade_result(pnl)
+        self._closed_today.append({"symbol": f"{op.underlying} {op.type}",
+                                   "pnl": round(pnl, 2),
+                                   "r_multiple": round(pnl / op.cost_basis, 2)
+                                   if op.cost_basis else 0.0})
+        self._open_risk.pop(op.symbol, None)
+        self._option_live.pop(op.symbol, None)
+        op.status = "closed"
+        self.option_positions.pop(op.symbol, None)
+        logger.info("%s: OPTION CLOSED (%s) pnl=$%.0f — %s",
+                    op.underlying, action, pnl, reason)
+
     def _ml_predict(self, symbol, df):
         if not settings.ML_ENABLED:
             return None
@@ -504,6 +705,69 @@ class TradingAgent:
             else:
                 return None
         return ens.predict(df)
+
+    def _sync_held_risk(self, positions, equity) -> None:
+        """Make every held broker position count toward the portfolio-heat cap.
+
+        Bot-managed positions already carry their precise entry-time risk in
+        ``_open_risk``. For positions not tracked by the manager (e.g. ones that
+        predate it), estimate open risk as distance-to-stop x qty when a working
+        stop exists, else fall back to the standard per-trade budget (1% of
+        equity) — which is how the bot sized them in the first place.
+        """
+        tracked = set(self.managed.keys())
+        tracked |= {op.symbol for op in self.option_positions.values()}
+        stops = self.broker.stop_prices()
+        for p in positions:
+            sym = p.symbol
+            if sym in tracked or sym.replace("/", "") in tracked:
+                continue   # already counted with its exact risk
+            try:
+                qty = abs(float(p.qty))
+                entry = float(p.avg_entry_price)
+            except (TypeError, ValueError):
+                continue
+            stop = stops.get(sym)
+            risk = abs(entry - stop) * qty if stop else settings.RISK_PER_TRADE * equity
+            self._open_risk[sym] = round(risk, 2)
+
+    @staticmethod
+    def _research_card(r) -> dict:
+        """Compact per-symbol research summary for the dashboard."""
+        ins, an, nw, so = r.insider, r.analyst, r.news, r.social
+        return {
+            "points": r.total_points,
+            "insider_emoji": ins.emoji if ins else "⚪",
+            "insider_summary": ins.summary if ins else "—",
+            "analyst_rating": an.rating if an else "N/A",
+            "analyst_color": an.badge_color if an else "grey",
+            "analyst_n": an.n_analysts if an else 0,
+            "target": an.target if an else 0.0,
+            "upside_pct": an.upside_pct if an else 0.0,
+            "news_emoji": nw.emoji if nw else "⚪",
+            "news_headline": nw.top_headline if nw else "",
+            "bull_pct": so.bull_pct if so else 0.0,
+            "social_status": so.status if so else "error",
+            "earnings_label": r.earnings.label,
+            "earnings_days": r.earnings.days_to if r.earnings.days_to is not None else -999,
+        }
+
+    def _check_earnings_warnings(self, positions) -> None:
+        """Telegram-warn once/day for any held position reporting within 1 day."""
+        if not settings.RESEARCH_ENABLED:
+            return
+        today = datetime.now(timezone.utc).date().isoformat()
+        for p in positions:
+            sym = p.symbol
+            if "/" in sym or self._earnings_warned.get(sym) == today:
+                continue
+            try:
+                e = self.research._earnings(sym)
+            except Exception:
+                continue
+            if e.days_to is not None and 0 <= e.days_to <= 1:
+                self.notifier.earnings_warning(symbol=sym, days_to=e.days_to)
+                self._earnings_warned[sym] = today
 
     def _held_closes(self, open_symbols):
         closes = {}
@@ -552,12 +816,31 @@ class TradingAgent:
             "tranches": mp.tranches_taken, "breakeven": mp.breakeven_done,
             "trailing": mp.trailing_active, "score": mp.score, "regime": mp.regime,
         } for mp in self.managed.values()]
+        options = []
+        for op in self.option_positions.values():
+            live = self._option_live.get(op.symbol, {})
+            cur = live.get("current_premium", op.premium_paid)
+            options.append({
+                "symbol": op.symbol, "underlying": op.underlying, "type": op.type,
+                "strike": op.strike, "expiration": op.expiration,
+                "contracts": op.contracts, "premium_paid": op.premium_paid,
+                "cost_basis": op.cost_basis, "current_premium": cur,
+                "value": live.get("value", op.cost_basis),
+                "pnl": live.get("pnl", 0.0),
+                "pnl_pct": ((cur - op.premium_paid) / op.premium_paid * 100)
+                if op.premium_paid else 0.0,
+                "score": op.score, "side_bias": op.side_bias,
+                "description": op.description,
+                "target_premium": op.target_premium, "stop_premium": op.stop_premium,
+            })
         self.state_store.write_state({
             "equity": st.equity, "buying_power": st.buying_power,
             "daily_pnl": st.daily_pnl, "weekly_pnl": st.weekly_pnl,
             "risk_state": st.risk_state, "halted": st.halted,
             "open_positions": st.open_positions, "scores": st.scores,
             "closed_today": st.closed_today, "managed": managed,
+            "options": options,
+            "research": self._research_view, "source_status": self._source_status,
         })
 
     def _detect_closed_trades(self, positions, equity) -> None:

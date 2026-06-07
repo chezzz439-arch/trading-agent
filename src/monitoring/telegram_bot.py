@@ -93,6 +93,24 @@ class TelegramNotifier:
             f"Risk: ${dollar_risk:,.2f} ({risk_pct:.2f}% account)\n"
             f"Regime: {regime}")
 
+    def trade_opened_research(self, *, symbol, side, entry, stop, target, rr,
+                              tech_score, research_bonus, total, research_lines) -> bool:
+        emoji = "🟢" if side == "long" else "🔴"
+        body = (f"*TRADE OPENED* {emoji}\n"
+                f"Symbol: {symbol} {side.upper()}\n"
+                f"Entry: ${entry:,.2f} | Stop: ${stop:,.2f} | Target: ${target:,.2f}\n"
+                f"RR: {rr:.1f}:1 | Technical Score: {tech_score:.0f} | "
+                f"Research Bonus: {research_bonus:+.0f} | Total: {total:.0f}/100")
+        if research_lines:
+            body += "\n\n" + "\n".join(research_lines)
+        return self.send(body)
+
+    def earnings_warning(self, *, symbol, days_to) -> bool:
+        when = "tomorrow" if days_to == 1 else ("today" if days_to == 0 else f"in {days_to} days")
+        return self.send(
+            f"*EARNINGS WARNING* ⚠️\n{symbol} reports {when} — you hold a position.\n"
+            f"Options never hold through earnings; review the stock position.")
+
     def trade_closed(self, *, symbol, side, pnl, rr_achieved, equity_after) -> bool:
         win = pnl >= 0
         return self.send(
@@ -148,3 +166,50 @@ class TelegramNotifier:
 
     def error_alert(self, message: str) -> bool:
         return self.send(f"*ERROR ALERT* ⚠️\n{message}")
+
+    # ------------------------------------------------------------------ #
+    # Options alerts
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _opt_exp(expiration: str) -> str:
+        from datetime import date
+        try:
+            d = date.fromisoformat(expiration)
+            return f"{d.strftime('%b')} {d.day}"
+        except (ValueError, TypeError):
+            return expiration
+
+    def option_bought(self, *, underlying, opt_type, strike, expiration,
+                      contracts, premium_paid, cost, description) -> bool:
+        # premium_paid is per-share; the human-facing "Paid" is total outlay.
+        return self.send(
+            f"*OPTION BOUGHT* 🎯\n"
+            f"{underlying} {opt_type.upper()} · Strike ${strike:,.0f} · "
+            f"Exp {self._opt_exp(expiration)} · Paid ${cost:,.0f}\n"
+            f"{contracts} contract(s) @ ${premium_paid:.2f}\n"
+            f"_{description}_")
+
+    def option_up(self, *, underlying, opt_type, strike, current_value, profit) -> bool:
+        return self.send(
+            f"*OPTION UP 50%* 📈\n"
+            f"{underlying} {opt_type.upper()} · Strike ${strike:,.0f}\n"
+            f"Now worth ${current_value:,.0f} · +${profit:,.0f} profit")
+
+    def option_doubled(self, *, underlying, opt_type, strike, sold_value, profit) -> bool:
+        return self.send(
+            f"*OPTION DOUBLED* 🎉\n"
+            f"{underlying} {opt_type.upper()} · Strike ${strike:,.0f}\n"
+            f"Sold at ${sold_value:,.0f} · +${profit:,.0f} profit")
+
+    def option_closed(self, *, underlying, opt_type, strike, reason, pnl) -> bool:
+        win = pnl >= 0
+        return self.send(
+            f"*OPTION CLOSED* {'✅' if win else '❌'}\n"
+            f"{underlying} {opt_type.upper()} · Strike ${strike:,.0f}\n"
+            f"{reason} · {'+'if win else '-'}${abs(pnl):,.0f} {'profit' if win else 'loss'}")
+
+    def option_expired(self, *, underlying, opt_type, strike, loss) -> bool:
+        return self.send(
+            f"*OPTION EXPIRED* ❌\n"
+            f"{underlying} {opt_type.upper()} · Strike ${strike:,.0f} · "
+            f"Expired worthless · -${abs(loss):,.0f} loss")

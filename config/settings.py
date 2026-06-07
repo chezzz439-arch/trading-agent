@@ -47,11 +47,11 @@ RSI_SHORT_THRESHOLD: float = 50.0  # short requires RSI below this
 # --------------------------------------------------------------------------- #
 # Reward / risk filter
 # --------------------------------------------------------------------------- #
-RR_RATIO: float = 4.0              # minimum acceptable reward:risk
+RR_RATIO: float = 3.0              # minimum acceptable reward:risk (TEMP: lowered from 4.0 to surface live trades)
 ATR_PERIOD: int = 14
 ATR_MULTIPLIER: float = 1.5        # stop distance = ATR * multiplier
 SWING_LOOKBACK: int = 100          # bars scanned for structural path veto
-RR_PATH_VETO: bool = True          # require a clear structural path to the target
+RR_PATH_VETO: bool = False         # TEMP: relaxed — path-veto was rejecting 100% of candidates, blocking all trades
 
 # --------------------------------------------------------------------------- #
 # Per-trade risk / position sizing
@@ -62,7 +62,7 @@ MAX_POSITION_PCT: float = 0.10     # cap a single position at 10% of equity
 # --------------------------------------------------------------------------- #
 # Portfolio risk
 # --------------------------------------------------------------------------- #
-MAX_CONCURRENT_POSITIONS: int = 3
+MAX_CONCURRENT_POSITIONS: int = 8
 DAILY_LOSS_LIMIT: float = 0.03      # kill switch at -3% from day-start equity
 WEEKLY_LOSS_LIMIT: float = 0.07     # kill switch at -7% from week-start equity
 MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
@@ -72,7 +72,7 @@ PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade
+MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade
 PRERANK_TOP_N: int = 20            # deep-analyze only the top-N pre-ranked names/scan
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
@@ -88,7 +88,7 @@ LOOKBACK_BARS: int = 300                   # bars pulled per request
 # --------------------------------------------------------------------------- #
 # Run loop / logging
 # --------------------------------------------------------------------------- #
-SCAN_INTERVAL: int = 300           # seconds between scans (5 minutes)
+SCAN_INTERVAL: int = 180           # seconds between scans (3 minutes)
 LOG_DIR: str = "logs"
 
 # --------------------------------------------------------------------------- #
@@ -135,6 +135,32 @@ def load_watchlist_meta() -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
+
+# --------------------------------------------------------------------------- #
+# Options (long calls/puts on strong signals — opt-in)
+# --------------------------------------------------------------------------- #
+# When True, a signal scoring >= OPTIONS_MIN_SCORE buys an ATM call (long bias)
+# or ATM put (short bias) instead of the stock/short. Default OFF so the live
+# bot keeps trading equities until this is explicitly enabled.
+OPTIONS_ENABLED: bool = False
+OPTIONS_MIN_SCORE: float = 70.0      # higher conviction bar than the stock MIN_SCORE
+OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive)
+OPTIONS_DTE_MAX: int = 45
+OPTIONS_RISK_PCT: float = 0.01       # max premium spend per trade = 1% of equity
+OPTIONS_MAX_POSITIONS: int = 3       # max concurrent option positions
+OPTIONS_PROFIT_TARGET: float = 1.00  # take profit at +100% (premium doubles)
+OPTIONS_STOP_LOSS: float = 0.50      # cut at -50% of premium paid
+OPTIONS_SKIP_EARNINGS: bool = True   # never hold an option through an earnings date
+OPTIONS_EXPIRY_EXIT_DAYS: int = 1    # close at <= N days to expiration (avoid worthless decay)
+
+# --------------------------------------------------------------------------- #
+# Research layer (insider / analyst / news / social + earnings)
+# --------------------------------------------------------------------------- #
+# Adds a clamped +/-25 research adjustment to the technical score, so strong
+# research can unlock a sub-threshold trade and bad research can block one.
+# Every source is error-safe (failure -> 0 points), so this can never crash the
+# loop. Set False to ignore research entirely.
+RESEARCH_ENABLED: bool = True
 
 # --------------------------------------------------------------------------- #
 # Monitoring

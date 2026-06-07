@@ -22,6 +22,7 @@ except RuntimeError:
 
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from config import settings
 from src.monitoring.sample_data import build_sample
@@ -118,9 +119,28 @@ def build_live(state: dict) -> dict:
             "score": float(m.get("score") or 0),
             "reasons": ["Passed the bot's full checklist"],
         })
+    # Options positions (shown separately from stocks).
+    options = []
+    for o in state.get("options", []):
+        paid = float(o.get("cost_basis") or 0)
+        value = float(o.get("value") or 0)
+        options.append({
+            "emoji": _emoji(o.get("underlying", "")), "underlying": o.get("underlying", "?"),
+            "symbol": o.get("symbol", ""), "type": o.get("type", "call"),
+            "strike": float(o.get("strike") or 0), "expiration": o.get("expiration", ""),
+            "contracts": int(o.get("contracts") or 0),
+            "premium_paid": float(o.get("premium_paid") or 0),
+            "current_premium": float(o.get("current_premium") or 0),
+            "paid": paid, "value": value, "pnl": float(o.get("pnl") or 0),
+            "pnl_pct": float(o.get("pnl_pct") or 0), "score": float(o.get("score") or 0),
+            "description": o.get("description", ""),
+            "target_premium": float(o.get("target_premium") or 0),
+            "stop_premium": float(o.get("stop_premium") or 0),
+        })
     # Show the FULL watchlist: live score where the bot has deep-scanned it,
     # else "awaiting scan" (the pre-rank only deep-scans the top names each cycle).
     scores_by = {s["symbol"]: s for s in state.get("scores", [])}
+    research_by = state.get("research", {})
     watching = []
     for sym in settings.load_watchlist():
         s = scores_by.get(sym)
@@ -131,11 +151,12 @@ def build_live(state: dict) -> dict:
             "emoji": _emoji(sym), "name": sym, "symbol": sym, "price": 0.0, "chg": 0.0,
             "view": view, "score": sc, "scored": scored,
             "status": "OWNED" if sym in managed else ("WATCHING" if (not scored or sc >= 50) else "AVOIDING"),
-            "reasons": ["Bot's live confidence score"] if scored else ["Pre-screened — awaiting next deep scan"]})
+            "reasons": ["Bot's live confidence score"] if scored else ["Pre-screened — awaiting next deep scan"],
+            "research": research_by.get(sym)})
     # Scored names first, by score.
     watching.sort(key=lambda w: (w["scored"], w["score"]), reverse=True)
     return {
-        "is_sample": False, "started": started, "equity": equity,
+        "is_sample": False, "started": started, "equity": equity, "options": options,
         "daily_pnl": float(state.get("daily_pnl", 0)),
         "daily_pct": float(state.get("daily_pnl", 0)) / started * 100,
         "all_time_pnl": equity - started, "all_time_pct": (equity - started) / started * 100,
@@ -156,7 +177,8 @@ def build_live(state: dict) -> dict:
                 "daily_loss_limit": started * settings.DAILY_LOSS_LIMIT,
                 "telegram": True, "broker": True, "logging": True,
                 "min_score": settings.MIN_SCORE, "rr": settings.RR_RATIO,
-                "risk_pct": settings.RISK_PER_TRADE * 100},
+                "risk_pct": settings.RISK_PER_TRADE * 100,
+                "source_status": state.get("source_status", {})},
         "performance": {"sharpe": 0.0, "max_drawdown_pct": 0.0, "max_drawdown_dollar": 0,
                         "avg_winner": 0.0, "avg_loser": 0.0, "monthly": []},
     }
@@ -342,6 +364,75 @@ def _trade_card(t):
 
 
 # --------------------------------------------------------------------------- #
+# PAGE — Options (call/put bets, shown separately from stocks)
+# --------------------------------------------------------------------------- #
+def _opt_exp_pretty(iso: str) -> str:
+    try:
+        d = _dt.date.fromisoformat(iso)
+        return f"{d.strftime('%b')} {d.day}, {d.year}"
+    except (ValueError, TypeError):
+        return iso or "—"
+
+
+def page_options(d):
+    opts = d.get("options", [])
+    st.markdown("### 🎯 Your Options Bets")
+    st.caption("Options are short-term bets on a stock's direction. A CALL profits "
+               "if it goes UP, a PUT if it goes DOWN. The most you can lose is what "
+               "you paid (the premium).")
+
+    if not opts:
+        st.markdown(
+            "<div class='card'><div class='pos-title'>📭 No options bets right now</div>"
+            "<p class='muted'>When the bot gets a high-confidence signal (70+), it can "
+            "buy a call or put instead of the stock — aiming to double its money while "
+            "risking only the premium. Active option bets show up here.</p></div>",
+            unsafe_allow_html=True)
+        return
+
+    total_paid = sum(o["paid"] for o in opts)
+    total_value = sum(o["value"] for o in opts)
+    total_pnl = total_value - total_paid
+    c1, c2, c3 = st.columns(3)
+    _mini(c1, "💸 Premium Paid", money(total_paid, cents=False), f"{len(opts)} bet(s)")
+    _mini(c2, "💵 Worth Now", money(total_value, cents=False), "current value")
+    _mini(c3, "🎯 Profit/Loss", signed(total_pnl), "on option bets", color=col_for(total_pnl))
+
+    for o in opts:
+        _option_card(o)
+
+
+def _option_card(o):
+    making = o["pnl"] >= 0
+    is_call = o["type"] == "call"
+    kind_tag = (f"<span class='tag' style='background:#e7f9ee;color:{GREEN}'>📈 CALL (betting UP)</span>"
+                if is_call else
+                f"<span class='tag' style='background:#fdeaec;color:{RED}'>📉 PUT (betting DOWN)</span>")
+    pl_tag = (f"<span class='tag' style='background:#e7f9ee;color:{GREEN}'>WINNING 🟢</span>"
+              if making else f"<span class='tag' style='background:#fdeaec;color:{RED}'>DOWN 🔴</span>")
+    # progress toward the +100% target (premium doubling), -50% stop at the left.
+    paid_prem = o["premium_paid"] or 1e-9
+    ratio = o["current_premium"] / paid_prem      # 0.5=stop, 1=flat, 2=target
+    prog = max(0, min(100, (ratio - 0.5) / 1.5 * 100))
+    st.markdown(f"""
+<div class='card'>
+  <div class='row'><div class='pos-title'>{o['emoji']} {o['description'] or o['underlying']}</div>{kind_tag}</div>
+  <p class='muted' style='margin:6px 0'>{o['contracts']} contract(s) ·
+     ${o['strike']:,.0f} strike · expires {_opt_exp_pretty(o['expiration'])}</p>
+  <div style='font-size:22px;font-weight:800;color:{col_for(o['pnl'])}'>
+     {signed(o['pnl'])} ({o['pnl_pct']:+.0f}%) {dot(making)} &nbsp;{pl_tag}</div>
+  <p class='muted' style='margin:8px 0'>Paid <b>{money(o['paid'])}</b> ·
+     worth now <b>{money(o['value'])}</b> &nbsp;·&nbsp; premium
+     <b>${o['premium_paid']:.2f}</b> → <b>${o['current_premium']:.2f}</b>/share</p>
+  <div class='bar'><div class='fill' style='width:{prog}%'></div><div class='dot' style='left:{prog}%'></div></div>
+  <div class='row muted'><span>🛡️ stop ${o['stop_premium']:.2f} (-50%)</span>
+     <span>now</span><span>🎯 double ${o['target_premium']:.2f} (+100%)</span></div>
+  <span class='pill'>Confidence when bought: {o['score']:.0f}/100</span>
+  <span class='pill'>Max loss: {money(o['paid'], cents=False)} (the premium)</span>
+</div>""", unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- #
 # PAGE 3 — Watching Now
 # --------------------------------------------------------------------------- #
 def page_watching(d):
@@ -403,8 +494,39 @@ def _watch_card(w):
   <div style='margin:8px 0;font-weight:800'>{view_emoji} {view_word}</div>
   {conf}
   <div style='margin-top:8px'>{reasons}</div>
+  {_research_block(w.get('research'))}
   <div style='margin-top:8px;font-weight:700;font-size:13px'>{status_map[w['status']]}</div>
 </div>""", unsafe_allow_html=True)
+
+
+_BADGE = {"green": GREEN, "blue": "#2563EB", "grey": GREY, "orange": "#F59E0B", "red": RED}
+
+
+def _research_block(r) -> str:
+    """Research summary rows inside a watch card (insider/analyst/news/social/earnings)."""
+    if not r:
+        return ""
+    pts = int(r.get("points", 0))
+    pts_col = GREEN if pts > 0 else (RED if pts < 0 else GREY)
+    rating = r.get("analyst_rating", "N/A")
+    badge = _BADGE.get(r.get("analyst_color", "grey"), GREY)
+    target = float(r.get("target", 0) or 0)
+    up = float(r.get("upside_pct", 0) or 0)
+    tgt = (f" · 🎯 ${target:.0f} ({up:+.0f}%)" if target else "")
+    head = (r.get("news_headline", "") or "")[:46]
+    ed = r.get("earnings_days", -999)
+    earn = (f"📅 Earnings {ed}d" if isinstance(ed, (int, float)) and ed >= 0 else "📅 Earnings —")
+    bull = float(r.get("bull_pct", 0) or 0)
+    social = (f"💬 {bull:.0f}% bull" if r.get("social_status") == "ok" else "💬 —")
+    return (
+        f"<div style='margin-top:8px;border-top:1px solid #f1f3f7;padding-top:6px;font-size:12px'>"
+        f"<div><span style='font-weight:800;color:{pts_col}'>Research {pts:+d}</span></div>"
+        f"<div>🏦 {r.get('insider_emoji','⚪')} {r.get('insider_summary','—')[:34]}</div>"
+        f"<div>👔 <span style='font-weight:700;color:{badge}'>{rating}</span> "
+        f"({r.get('analyst_n',0)}){tgt}</div>"
+        f"<div>📰 {r.get('news_emoji','⚪')} {head}</div>"
+        f"<div>{social} · {earn}</div>"
+        f"</div>")
 
 
 # --------------------------------------------------------------------------- #
@@ -485,6 +607,22 @@ def page_bot(d):
         f"🏦 Broker: {dot(b['broker'])} &nbsp; 💾 Saving trades: {dot(b['logging'])}</p></div>",
         unsafe_allow_html=True)
 
+    # Research data-source health
+    ss = b.get("source_status", {})
+    if ss:
+        labels = {"insider": "🏦 Insider (SEC)", "analyst": "👔 Analysts", "news": "📰 News",
+                  "social": "💬 StockTwits", "earnings": "📅 Earnings"}
+        rows = ""
+        for key, lab in labels.items():
+            stt = ss.get(key, "—")
+            dt = "🟢" if stt == "ok" else ("⚪" if stt in ("insufficient", "n/a", "—") else "🔴")
+            rows += f"<div class='row'><span>{lab}</span><span>{dt} {stt}</span></div>"
+        st.markdown(f"<div class='card'><div style='font-weight:800'>🔬 Research data sources</div>"
+                    f"<div style='margin-top:6px;font-size:14px'>{rows}</div>"
+                    f"<p class='muted' style='font-size:12px;margin-top:6px'>A failed source "
+                    f"contributes 0 points — the bot keeps trading on its other signals.</p></div>",
+                    unsafe_allow_html=True)
+
     c1, c2 = st.columns(2)
     if b["running"]:
         if c1.button("⛔ STOP ALL TRADING", type="primary", width="stretch"):
@@ -509,8 +647,9 @@ def page_bot(d):
 # --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
-PAGES = {"💰 Home": page_home, "📋 Trades": page_trades, "👁️ Watching": page_watching,
-         "📊 Performance": page_performance, "🤖 Bot": page_bot}
+PAGES = {"💰 Home": page_home, "📋 Trades": page_trades, "🎯 Options": page_options,
+         "👁️ Watching": page_watching, "📊 Performance": page_performance,
+         "🤖 Bot": page_bot}
 
 
 def _nav():
@@ -534,8 +673,8 @@ def main():
     top_bar(d, mode)
     page = st.session_state.get("force_page") or _nav() or list(PAGES.keys())[0]
 
-    # Controls row: refresh + data mode toggle.
-    cc1, cc2, cc3 = st.columns([1, 1, 3])
+    # Controls row: refresh + data mode toggle + auto-refresh.
+    cc1, cc2, cc3, cc4 = st.columns([1, 1, 1.4, 2.6])
     if cc1.button("🔄 Refresh"):
         st.rerun()
     new_mode = cc2.selectbox("Data", ["Demo", "Live"],
@@ -543,6 +682,14 @@ def main():
     if new_mode != mode:
         st.session_state["data_mode"] = new_mode
         st.rerun()
+    # Auto-refresh: re-reads the agent's state file on a timer (default on, 30s).
+    auto = cc3.toggle("Auto-refresh", value=st.session_state.get("auto_refresh", True),
+                      key="auto_refresh", help="Re-pull the bot's latest state on a timer.")
+    if auto:
+        st_autorefresh(interval=30_000, key="auto_refresh_tick")
+        cc4.caption("🟢 Live updating every 30s")
+    else:
+        cc4.caption("⏸️ Paused — hit Refresh to update")
 
     try:
         PAGES[page](d)

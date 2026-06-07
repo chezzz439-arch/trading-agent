@@ -33,7 +33,7 @@ MIN_PRICE = 15.0
 MIN_MARKET_CAP = 3e9
 MIN_AVG_VOLUME = 500_000
 MIN_HISTORY_DAYS = 240          # ~1 trading year
-TOP_N_STOCKS = 100
+TOP_N_STOCKS = 150
 WATCHLIST_PATH = settings.WATCHLIST_PATH
 
 _SOURCES = [
@@ -45,7 +45,10 @@ _SOURCES = [
 
 _SECTOR_FIX = {"Information Technology": "Technology", "Health Care": "Healthcare"}
 
-# 20 crypto pairs with category; DOGE gets a smaller size override.
+# 23 crypto pairs with category; DOGE gets a smaller size override.
+# (Tradability is checked live against Alpaca; untradeable pairs are tagged
+# data-only automatically. MKR/SNX were requested but are inactive/unlisted on
+# Alpaca, so they're omitted rather than added as never-tradeable noise.)
 _CRYPTO = [
     ("BTC/USD", "Bitcoin", "Layer1"), ("ETH/USD", "Ethereum", "Layer1"),
     ("SOL/USD", "Solana", "Layer1"), ("BNB/USD", "Binance Coin", "Exchange"),
@@ -57,6 +60,8 @@ _CRYPTO = [
     ("FIL/USD", "Filecoin", "Infrastructure"), ("NEAR/USD", "NEAR Protocol", "Layer1"),
     ("ARB/USD", "Arbitrum", "Infrastructure"), ("OP/USD", "Optimism", "Infrastructure"),
     ("APT/USD", "Aptos", "Layer1"), ("INJ/USD", "Injective", "DeFi"),
+    ("AAVE/USD", "Aave", "DeFi"), ("CRV/USD", "Curve", "DeFi"),
+    ("SUSHI/USD", "SushiSwap", "DeFi"),
 ]
 
 

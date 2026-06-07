@@ -43,6 +43,17 @@ def _round(x: float) -> float:
     return round(x, 2)
 
 
+def _round_price(x: float) -> float:
+    """Round to a valid US-equity tick so Alpaca won't reject for sub-penny pricing.
+
+    Equities priced >= $1.00 must be in $0.01 increments; below $1.00 the venue
+    allows $0.0001. Bracket legs come from float math upstream, so round here
+    defensively rather than trusting the caller.
+    """
+    x = float(x)
+    return round(x, 2) if abs(x) >= 1.0 else round(x, 4)
+
+
 class Broker:
     def __init__(self, api_key: str, secret_key: str, paper: bool = True) -> None:
         self._client = TradingClient(api_key, secret_key, paper=paper)
@@ -79,6 +90,24 @@ class Broker:
             logger.exception("Failed to fetch open orders")
             return set()
 
+    def stop_prices(self) -> dict[str, float]:
+        """Map symbol -> protective stop price from all working stop orders.
+
+        Used to estimate a held position's open risk (distance to stop x qty) for
+        the portfolio-heat counter. Symbols without a working stop simply won't
+        appear, and the caller falls back to a default risk estimate.
+        """
+        out: dict[str, float] = {}
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
+            for o in self._client.get_orders(filter=req):
+                sp = getattr(o, "stop_price", None)
+                if sp and getattr(o, "type", None) and "stop" in str(o.type).lower():
+                    out[o.symbol] = float(sp)
+        except Exception:
+            logger.exception("Failed to read stop prices")
+        return out
+
     def has_open_order(self, symbol: str) -> bool:
         """True if a working order already exists for ``symbol``."""
         try:
@@ -112,8 +141,8 @@ class Broker:
                 side=side,
                 time_in_force=TimeInForce.DAY,
                 order_class=OrderClass.BRACKET,
-                take_profit=TakeProfitRequest(limit_price=plan.target),
-                stop_loss=StopLossRequest(stop_price=plan.stop),
+                take_profit=TakeProfitRequest(limit_price=_round_price(plan.target)),
+                stop_loss=StopLossRequest(stop_price=_round_price(plan.stop)),
             )
             logger.info(
                 "Submitting %s BRACKET %s qty=%s entry~%.2f stop=%.2f tp=%.2f "
@@ -200,13 +229,33 @@ class Broker:
     def _place_limit_bracket(self, trade: SizedTrade, limit_price: float) -> Any | None:
         plan = trade.plan
         side = OrderSide.BUY if plan.side == "long" else OrderSide.SELL
+        limit_price = _round_price(limit_price)
+        stop_px, target_px = _round_price(plan.stop), _round_price(plan.target)
+
+        # A bracket is only valid when the entry price sits *between* its
+        # protective legs: stop < entry < target for a long, target < entry <
+        # stop for a short. The pullback reference (an EMA) can fall outside that
+        # band — e.g. after a sharp drop a short's EMA sits above its stop — which
+        # makes the short's stop land below the entry and Alpaca rejects the whole
+        # bracket. Detect that and fall back to a market bracket at current price.
+        if plan.side == "long":
+            valid = stop_px < limit_price < target_px
+        else:
+            valid = target_px < limit_price < stop_px
+        if not valid:
+            logger.info(
+                "%s: limit %.2f outside bracket band [stop=%.2f target=%.2f] — "
+                "falling back to market bracket", plan.symbol, limit_price, stop_px, target_px,
+            )
+            return self.place_bracket_order(trade)
+
         try:
             order = LimitOrderRequest(
                 symbol=plan.symbol, qty=trade.qty, side=side,
                 time_in_force=TimeInForce.DAY, limit_price=limit_price,
                 order_class=OrderClass.BRACKET,
-                take_profit=TakeProfitRequest(limit_price=plan.target),
-                stop_loss=StopLossRequest(stop_price=plan.stop),
+                take_profit=TakeProfitRequest(limit_price=target_px),
+                stop_loss=StopLossRequest(stop_price=stop_px),
             )
             logger.info("%s: smart LIMIT bracket entry @%.2f (better than %.2f)",
                         plan.symbol, limit_price, plan.entry)
@@ -271,3 +320,44 @@ class Broker:
             self._client.close_all_positions(cancel_orders=True)
         except Exception:
             logger.exception("close_all failed")
+
+    # ------------------------------------------------------------------ #
+    # Options (long calls/puts — buy-to-open / sell-to-close, single leg)
+    # ------------------------------------------------------------------ #
+    def get_option_positions(self) -> list[Any]:
+        """Only the option positions (asset_class us_option)."""
+        out = []
+        for p in self.get_positions():
+            if str(getattr(p, "asset_class", "")).endswith("us_option"):
+                out.append(p)
+        return out
+
+    def buy_option(self, option_symbol: str, contracts: int) -> Any | None:
+        """Buy-to-open a long option (market, DAY). Returns the order or None.
+
+        Single-leg long calls/puts only — max loss is the premium paid, so no
+        bracket/stop legs are attached (exits are managed by re-pricing the
+        premium each scan against the +100%/-50% rules).
+        """
+        try:
+            order = MarketOrderRequest(
+                symbol=option_symbol, qty=contracts, side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY,
+            )
+            result = self._client.submit_order(order)
+            logger.info("OPTION buy %s x%d accepted id=%s status=%s",
+                        option_symbol, contracts, result.id, result.status)
+            return result
+        except Exception:
+            logger.exception("buy_option failed for %s", option_symbol)
+            return None
+
+    def close_option(self, option_symbol: str) -> bool:
+        """Sell-to-close an entire option position."""
+        try:
+            self._client.close_position(option_symbol)
+            logger.info("OPTION %s: position closed", option_symbol)
+            return True
+        except Exception:
+            logger.exception("close_option failed for %s", option_symbol)
+            return False

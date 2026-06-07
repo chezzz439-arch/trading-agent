@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-06-05T08:29:02.409025+00:00",
+  "generated_at": "2026-06-07T04:53:11.262607+00:00",
   "criteria": {
     "min_price": 15.0,
     "min_market_cap": 3000000000.0,
     "min_avg_volume": 500000,
     "min_history_days": 240,
-    "top_n_stocks": 100,
+    "top_n_stocks": 150,
     "rank": "price * volume * market_cap"
   },
   "funnel": {
     "universe": 1114,
     "have_data": 1114,
-    "price_ok": 1061,
-    "volume_ok": 960,
-    "history_ok": 948,
-    "mcap_ok": 100
+    "price_ok": 1057,
+    "volume_ok": 953,
+    "history_ok": 941,
+    "mcap_ok": 150
   },
-  "count": 120,
+  "count": 173,
   "symbols": [
     "NVDA",
     "AAPL",
-    "MU",
     "GOOGL",
     "MSFT",
+    "MU",
     "GOOG",
     "TSLA",
     "AMZN",
@@ -31,93 +31,143 @@
     "AMD",
     "INTC",
     "SNDK",
-    "MRVL",
     "LLY",
-    "ORCL",
     "WMT",
+    "ORCL",
+    "MRVL",
     "BRK.B",
     "JPM",
-    "ARM",
     "PLTR",
     "CSCO",
     "ASML",
-    "QCOM",
-    "XOM",
-    "AMAT",
     "V",
+    "XOM",
+    "ARM",
+    "AMAT",
+    "QCOM",
     "DELL",
-    "LRCX",
-    "CAT",
     "COST",
-    "IBM",
     "UNH",
+    "LRCX",
     "JNJ",
+    "CAT",
     "NFLX",
+    "IBM",
     "BAC",
-    "WDC",
-    "GS",
     "MA",
+    "GS",
     "CVX",
-    "TXN",
-    "STX",
     "PANW",
+    "WDC",
+    "TXN",
     "GEV",
-    "KLAC",
-    "APP",
+    "STX",
     "GE",
-    "CRWD",
+    "APP",
     "HD",
-    "NOW",
-    "GLW",
     "ABBV",
+    "KLAC",
+    "NOW",
+    "CRWD",
     "CRM",
-    "ADI",
-    "MS",
-    "LITE",
-    "ANET",
     "PG",
     "KO",
+    "MS",
+    "ADI",
+    "GLW",
     "WFC",
-    "C",
+    "LITE",
     "MRK",
+    "ANET",
+    "C",
     "APH",
     "BA",
-    "RKLB",
     "LIN",
-    "SNOW",
-    "VRT",
-    "TMO",
+    "RTX",
     "MCD",
-    "COHR",
-    "SHOP",
-    "UBER",
+    "RKLB",
+    "PM",
+    "SNOW",
+    "TMO",
+    "PEP",
     "NEE",
+    "AXP",
+    "VRT",
+    "UBER",
+    "TJX",
+    "VZ",
+    "SHOP",
+    "ABT",
+    "COHR",
+    "TMUS",
     "HOOD",
-    "DDOG",
+    "SCHW",
+    "AMGN",
+    "ISRG",
     "BKNG",
+    "ETN",
     "INTU",
-    "HPE",
-    "ALAB",
+    "GILD",
+    "T",
+    "DIS",
+    "DE",
+    "HON",
+    "UNP",
+    "DDOG",
+    "PFE",
     "ADBE",
-    "NET",
+    "PDD",
+    "HPE",
     "SPOT",
+    "WELL",
+    "SPGI",
+    "DHR",
+    "ACN",
+    "NET",
+    "SYK",
+    "COP",
+    "ALAB",
+    "MDT",
+    "CVS",
     "MELI",
     "CEG",
-    "NXPI",
-    "CIEN",
+    "FTNT",
+    "COF",
+    "MCK",
+    "CDNS",
     "MSTR",
-    "TER",
-    "ASTS",
+    "NXPI",
+    "PWR",
+    "CIEN",
+    "SNPS",
+    "CME",
     "BSX",
-    "F",
+    "NEM",
+    "TER",
+    "MPWR",
+    "FCX",
+    "ASTS",
+    "CMCSA",
+    "ROST",
+    "RCL",
     "ON",
     "COIN",
+    "NKE",
+    "FLEX",
+    "DASH",
+    "REGN",
     "MCHP",
     "SMCI",
-    "CRCL",
+    "VST",
+    "RDDT",
     "MDB",
-    "AKAM",
+    "WDAY",
+    "CRCL",
+    "SATS",
+    "FSLR",
     "SOFI",
+    "AKAM",
+    "ZS",
     "BTC/USD",
     "ETH/USD",
     "SOL/USD",
@@ -137,7 +187,10 @@
     "ARB/USD",
     "OP/USD",
     "APT/USD",
-    "INJ/USD"
+    "INJ/USD",
+    "AAVE/USD",
+    "CRV/USD",
+    "SUSHI/USD"
   ],
   "meta": {
     "NVDA": {
@@ -145,900 +198,1350 @@
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 218.66,
-      "market_cap": 5296163948699.951,
-      "avg_volume": 175226715
+      "price": 205.1,
+      "market_cap": 4967727247833.252,
+      "avg_volume": 177771005
     },
     "AAPL": {
       "name": "Apple Inc.",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 311.23,
-      "market_cap": 4571145969240.112,
-      "avg_volume": 46803840
-    },
-    "MU": {
-      "name": "Micron Technology",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 996.0,
-      "market_cap": 1123223114796.0,
-      "avg_volume": 54977140
+      "price": 307.34,
+      "market_cap": 4514011939253.296,
+      "avg_volume": 47808380
     },
     "GOOGL": {
       "name": "Alphabet Inc. (Class A)",
       "sector": "Communication Services",
       "asset_class": "stock",
       "tradable": true,
-      "price": 372.19,
-      "market_cap": 4528198872678.116,
-      "avg_volume": 30689625
+      "price": 368.53,
+      "market_cap": 4494199462845.795,
+      "avg_volume": 31340565
     },
     "MSFT": {
       "name": "Microsoft",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 428.05,
-      "market_cap": 3179741384368.0654,
-      "avg_volume": 37004200
+      "price": 416.67,
+      "market_cap": 3095205987862.728,
+      "avg_volume": 36991520
+    },
+    "MU": {
+      "name": "Micron Technology",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 864.01,
+      "market_cap": 974373508417.5378,
+      "avg_volume": 56470465
     },
     "GOOG": {
       "name": "Alphabet Inc. (Class C)",
       "sector": "Communication Services",
       "asset_class": "stock",
       "tradable": true,
-      "price": 355.68,
-      "market_cap": 4492673061461.64,
-      "avg_volume": 21861894
+      "price": 365.76,
+      "market_cap": 4460419626255.645,
+      "avg_volume": 22275505
     },
     "TSLA": {
       "name": "Tesla, Inc.",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 418.45,
-      "market_cap": 1571582699666.1887,
-      "avg_volume": 49922740
+      "price": 391.0,
+      "market_cap": 1468488033561.0,
+      "avg_volume": 49873135
     },
     "AMZN": {
       "name": "Amazon",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 253.79,
-      "market_cap": 2730046731540.6357,
-      "avg_volume": 39315105
+      "price": 246.03,
+      "market_cap": 2646571621407.843,
+      "avg_volume": 40297230
     },
     "AVGO": {
       "name": "Broadcom",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 418.91,
-      "market_cap": 1983399866298.3127,
-      "avg_volume": 26107805
+      "price": 385.73,
+      "market_cap": 1826303610630.9382,
+      "avg_volume": 27531865
     },
     "META": {
       "name": "Meta Platforms",
       "sector": "Communication Services",
       "asset_class": "stock",
       "tradable": true,
-      "price": 622.98,
-      "market_cap": 1593038312891.28,
-      "avg_volume": 15852609
+      "price": 593.0,
+      "market_cap": 1505285019272.0,
+      "avg_volume": 16763075
     },
     "AMD": {
       "name": "Advanced Micro Devices",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 523.2,
-      "market_cap": 853130274229.593,
-      "avg_volume": 34178820
+      "price": 466.38,
+      "market_cap": 760479533978.7372,
+      "avg_volume": 34276515
     },
     "INTC": {
       "name": "Intel",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 111.78,
-      "market_cap": 561806273864.7461,
-      "avg_volume": 132256680
+      "price": 99.17,
+      "market_cap": 498428410797.11914,
+      "avg_volume": 133355175
     },
     "SNDK": {
       "name": "Sandisk",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 1831.5,
-      "market_cap": 260590585357.44,
-      "avg_volume": 12407272
-    },
-    "MRVL": {
-      "name": "Marvell Technology",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 316.43,
-      "market_cap": 277051284119.64703,
-      "avg_volume": 41453485
+      "price": 1559.32,
+      "market_cap": 230919313490.52026,
+      "avg_volume": 12261640
     },
     "LLY": {
       "name": "Lilly (Eli)",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 1125.27,
-      "market_cap": 1003449869346.4443,
-      "avg_volume": 3160990
-    },
-    "ORCL": {
-      "name": "Oracle Corporation",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 236.34,
-      "market_cap": 679724701107.605,
-      "avg_volume": 21753095
+      "price": 1131.42,
+      "market_cap": 1008934100764.3748,
+      "avg_volume": 3192485
     },
     "WMT": {
       "name": "Walmart",
       "sector": "Consumer Staples",
       "asset_class": "stock",
       "tradable": true,
-      "price": 117.74,
-      "market_cap": 936984222709.4088,
-      "avg_volume": 24496955
+      "price": 118.88,
+      "market_cap": 946056428088.8828,
+      "avg_volume": 25582745
+    },
+    "ORCL": {
+      "name": "Oracle Corporation",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 213.68,
+      "market_cap": 614553488215.21,
+      "avg_volume": 21610865
+    },
+    "MRVL": {
+      "name": "Marvell Technology",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 263.47,
+      "market_cap": 230681995559.1005,
+      "avg_volume": 44937200
     },
     "BRK.B": {
       "name": "Berkshire Hathaway",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 478.63,
-      "market_cap": 1032334943389.6227,
-      "avg_volume": 4986285
+      "price": 488.13,
+      "market_cap": 1052825054461.1227,
+      "avg_volume": 5114645
     },
     "JPM": {
       "name": "JPMorgan Chase",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 310.89,
-      "market_cap": 833033343992.6755,
-      "avg_volume": 8809930
-    },
-    "ARM": {
-      "name": "Arm Holdings",
-      "sector": "Unknown",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 411.83,
-      "market_cap": 418641335334.24,
-      "avg_volume": 12876047
+      "price": 312.37,
+      "market_cap": 836998968557.1082,
+      "avg_volume": 8847905
     },
     "PLTR": {
       "name": "Palantir Technologies",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 142.2,
-      "market_cap": 339699107140.89996,
-      "avg_volume": 41727270
+      "price": 135.53,
+      "market_cap": 324907689316.4038,
+      "avg_volume": 41140970
     },
     "CSCO": {
       "name": "Cisco",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 130.0,
-      "market_cap": 512386506450.0,
-      "avg_volume": 30014415
+      "price": 121.64,
+      "market_cap": 479436110244.9392,
+      "avg_volume": 30819640
     },
     "ASML": {
       "name": "ASML Holding",
       "sector": "Unknown",
       "asset_class": "stock",
       "tradable": true,
-      "price": 1757.47,
-      "market_cap": 677359972416.0168,
-      "avg_volume": 1623160
-    },
-    "QCOM": {
-      "name": "Qualcomm",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 242.57,
-      "market_cap": 255668787719.72656,
-      "avg_volume": 27390630
-    },
-    "XOM": {
-      "name": "ExxonMobil",
-      "sector": "Energy",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 152.04,
-      "market_cap": 630197738681.8552,
-      "avg_volume": 17113745
-    },
-    "AMAT": {
-      "name": "Applied Materials",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 501.7,
-      "market_cap": 398329455722.8876,
-      "avg_volume": 8164735
+      "price": 1641.74,
+      "market_cap": 632755593573.2556,
+      "avg_volume": 1673940
     },
     "V": {
       "name": "Visa Inc.",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 320.18,
-      "market_cap": 608900315955.2124,
-      "avg_volume": 8166635
+      "price": 323.57,
+      "market_cap": 615347255294.7876,
+      "avg_volume": 8166190
+    },
+    "XOM": {
+      "name": "ExxonMobil",
+      "sector": "Energy",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 149.92,
+      "market_cap": 621410470937.415,
+      "avg_volume": 16817430
+    },
+    "ARM": {
+      "name": "Arm Holdings",
+      "sector": "Unknown",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 342.93,
+      "market_cap": 364895969042.16705,
+      "avg_volume": 12509125
+    },
+    "AMAT": {
+      "name": "Applied Materials",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 453.01,
+      "market_cap": 359671569137.81006,
+      "avg_volume": 8372840
+    },
+    "QCOM": {
+      "name": "Qualcomm",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 215.94,
+      "market_cap": 227600762573.2422,
+      "avg_volume": 26045065
     },
     "DELL": {
       "name": "Dell Technologies",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 421.08,
-      "market_cap": 274150295528.35,
-      "avg_volume": 11802765
-    },
-    "LRCX": {
-      "name": "Lam Research",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 336.41,
-      "market_cap": 420693829569.6106,
-      "avg_volume": 8789055
-    },
-    "CAT": {
-      "name": "Caterpillar Inc.",
-      "sector": "Industrials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 940.48,
-      "market_cap": 433177539175.90283,
-      "avg_volume": 2654100
+      "price": 394.39,
+      "market_cap": 256183246225.09045,
+      "avg_volume": 12109560
     },
     "COST": {
       "name": "Costco",
       "sector": "Consumer Staples",
       "asset_class": "stock",
       "tradable": true,
-      "price": 972.35,
-      "market_cap": 431216604242.28076,
-      "avg_volume": 2466670
-    },
-    "IBM": {
-      "name": "IBM",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 301.77,
-      "market_cap": 283629170619.7119,
-      "avg_volume": 11927390
+      "price": 971.87,
+      "market_cap": 431003743078.05615,
+      "avg_volume": 2520190
     },
     "UNH": {
       "name": "UnitedHealth Group",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 396.47,
-      "market_cap": 360052012962.4547,
-      "avg_volume": 6930285
+      "price": 399.47,
+      "market_cap": 362776446174.4547,
+      "avg_volume": 7213685
+    },
+    "LRCX": {
+      "name": "Lam Research",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 303.28,
+      "market_cap": 379263466393.46313,
+      "avg_volume": 8969105
     },
     "JNJ": {
       "name": "Johnson & Johnson",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 228.17,
-      "market_cap": 549254691865.3241,
-      "avg_volume": 7659620
+      "price": 232.77,
+      "market_cap": 560327904624.4105,
+      "avg_volume": 7697855
+    },
+    "CAT": {
+      "name": "Caterpillar Inc.",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 904.28,
+      "market_cap": 416504131881.14575,
+      "avg_volume": 2645290
     },
     "NFLX": {
       "name": "Netflix",
       "sector": "Communication Services",
       "asset_class": "stock",
       "tradable": true,
-      "price": 81.56,
-      "market_cap": 343432717663.41016,
-      "avg_volume": 33331270
+      "price": 82.18,
+      "market_cap": 346043424316.0737,
+      "avg_volume": 33974355
+    },
+    "IBM": {
+      "name": "IBM",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 284.84,
+      "market_cap": 267716919713.2373,
+      "avg_volume": 12278210
     },
     "BAC": {
       "name": "Bank of America",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 54.17,
-      "market_cap": 384422302570.42444,
-      "avg_volume": 39174705
-    },
-    "WDC": {
-      "name": "Western Digital",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 575.5,
-      "market_cap": 198364566390.5,
-      "avg_volume": 6736995
-    },
-    "GS": {
-      "name": "Goldman Sachs",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 1092.61,
-      "market_cap": 322328053937.41223,
-      "avg_volume": 2178375
+      "price": 53.83,
+      "market_cap": 382009487737.57556,
+      "avg_volume": 39682995
     },
     "MA": {
       "name": "Mastercard",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 481.76,
-      "market_cap": 425675366613.5486,
-      "avg_volume": 3725970
+      "price": 491.08,
+      "market_cap": 433910347648.8707,
+      "avg_volume": 3689315
+    },
+    "GS": {
+      "name": "Goldman Sachs",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 1038.68,
+      "market_cap": 306418323889.40515,
+      "avg_volume": 2224855
     },
     "CVX": {
       "name": "Chevron Corporation",
       "sector": "Energy",
       "asset_class": "stock",
       "tradable": true,
-      "price": 188.35,
-      "market_cap": 375117444977.9479,
-      "avg_volume": 9932425
-    },
-    "TXN": {
-      "name": "Texas Instruments",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 305.37,
-      "market_cap": 277915031143.85754,
-      "avg_volume": 7960950
-    },
-    "STX": {
-      "name": "Seagate Technology",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 925.99,
-      "market_cap": 207633802112.34375,
-      "avg_volume": 3513470
+      "price": 187.31,
+      "market_cap": 373046166318.62085,
+      "avg_volume": 9638395
     },
     "PANW": {
       "name": "Palo Alto Networks",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 280.43,
-      "market_cap": 227588750000.0,
-      "avg_volume": 10378733
+      "price": 272.05,
+      "market_cap": 221720740051.26953,
+      "avg_volume": 10248440
+    },
+    "WDC": {
+      "name": "Western Digital",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 511.72,
+      "market_cap": 176380740496.07455,
+      "avg_volume": 6829485
+    },
+    "TXN": {
+      "name": "Texas Instruments",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 285.06,
+      "market_cap": 259431048780.55377,
+      "avg_volume": 8206935
     },
     "GEV": {
       "name": "GE Vernova",
       "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 959.36,
-      "market_cap": 258866032783.35,
-      "avg_volume": 2369956
+      "price": 933.61,
+      "market_cap": 250879670595.62195,
+      "avg_volume": 2393145
     },
-    "KLAC": {
-      "name": "KLA Corporation",
+    "STX": {
+      "name": "Seagate Technology",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 2131.1,
-      "market_cap": 278380322759.69385,
-      "avg_volume": 989110
-    },
-    "APP": {
-      "name": "AppLovin",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 570.83,
-      "market_cap": 187746520101.27,
-      "avg_volume": 5341632
+      "price": 847.47,
+      "market_cap": 190027337281.03125,
+      "avg_volume": 3449020
     },
     "GE": {
       "name": "GE Aerospace",
       "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 327.65,
-      "market_cap": 342338413045.81616,
-      "avg_volume": 4942450
+      "price": 328.0,
+      "market_cap": 342704109784.0,
+      "avg_volume": 4866125
     },
-    "CRWD": {
-      "name": "CrowdStrike",
+    "APP": {
+      "name": "AppLovin",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 747.61,
-      "market_cap": 183055016413.80002,
-      "avg_volume": 3894677
+      "price": 557.2,
+      "market_cap": 187185505202.02423,
+      "avg_volume": 4989130
     },
     "HD": {
       "name": "Home Depot (The)",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 309.95,
-      "market_cap": 309056327757.7345,
-      "avg_volume": 5415565
-    },
-    "NOW": {
-      "name": "ServiceNow",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 117.9,
-      "market_cap": 123096922880.0,
-      "avg_volume": 34761071
-    },
-    "GLW": {
-      "name": "Corning Inc.",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 197.7,
-      "market_cap": 170148095376.0418,
-      "avg_volume": 14792245
+      "price": 310.78,
+      "market_cap": 309883921214.77655,
+      "avg_volume": 5392300
     },
     "ABBV": {
       "name": "AbbVie",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 217.13,
-      "market_cap": 397422377155.74,
-      "avg_volume": 5506392
+      "price": 227.23,
+      "market_cap": 401468325167.2767,
+      "avg_volume": 5559880
+    },
+    "KLAC": {
+      "name": "KLA Corporation",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 1929.2,
+      "market_cap": 252006607134.90308,
+      "avg_volume": 1019975
+    },
+    "NOW": {
+      "name": "ServiceNow",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 112.45,
+      "market_cap": 115970581452.69775,
+      "avg_volume": 35060400
+    },
+    "CRWD": {
+      "name": "CrowdStrike",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 671.02,
+      "market_cap": 170818090488.36914,
+      "avg_volume": 3903500
     },
     "CRM": {
       "name": "Salesforce",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 188.75,
-      "market_cap": 154586250000.0,
-      "avg_volume": 15773345
-    },
-    "ADI": {
-      "name": "Analog Devices",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 428.76,
-      "market_cap": 208843444027.10938,
-      "avg_volume": 4909110
-    },
-    "MS": {
-      "name": "Morgan Stanley",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 218.27,
-      "market_cap": 344273963745.4778,
-      "avg_volume": 5832715
-    },
-    "LITE": {
-      "name": "Lumentum",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 938.0,
-      "market_cap": 73527224000.0,
-      "avg_volume": 6285985
-    },
-    "ANET": {
-      "name": "Arista Networks",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 174.37,
-      "market_cap": 209034718402.37997,
-      "avg_volume": 11870112
+      "price": 185.66,
+      "market_cap": 152055542999.26758,
+      "avg_volume": 15734180
     },
     "PG": {
       "name": "Procter & Gamble",
       "sector": "Consumer Staples",
       "asset_class": "stock",
       "tradable": true,
-      "price": 140.78,
-      "market_cap": 327820161280.31195,
-      "avg_volume": 8475390
+      "price": 146.54,
+      "market_cap": 341232878602.2157,
+      "avg_volume": 8546270
     },
     "KO": {
       "name": "Coca-Cola Company (The)",
       "sector": "Consumer Staples",
       "asset_class": "stock",
       "tradable": true,
-      "price": 76.82,
-      "market_cap": 330516698037.7466,
-      "avg_volume": 15163550
+      "price": 79.48,
+      "market_cap": 341961317025.7878,
+      "avg_volume": 15623035
+    },
+    "MS": {
+      "name": "Morgan Stanley",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 211.93,
+      "market_cap": 334273959714.43097,
+      "avg_volume": 5853185
+    },
+    "ADI": {
+      "name": "Analog Devices",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 401.39,
+      "market_cap": 195511874120.66406,
+      "avg_volume": 5074315
+    },
+    "GLW": {
+      "name": "Corning Inc.",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 177.58,
+      "market_cap": 152832066539.37494,
+      "avg_volume": 14562980
     },
     "WFC": {
       "name": "Wells Fargo",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 81.62,
-      "market_cap": 249772674905.3415,
-      "avg_volume": 18045960
+      "price": 81.94,
+      "market_cap": 250751934609.52576,
+      "avg_volume": 17846835
     },
-    "C": {
-      "name": "Citigroup",
-      "sector": "Financials",
+    "LITE": {
+      "name": "Lumentum",
+      "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 135.15,
-      "market_cap": 230508715058.2344,
-      "avg_volume": 10812860
+      "price": 863.66,
+      "market_cap": 67192745910.64453,
+      "avg_volume": 6300535
     },
     "MRK": {
       "name": "Merck & Co.",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 120.26,
-      "market_cap": 297021089424.01416,
-      "avg_volume": 9256575
+      "price": 120.79,
+      "market_cap": 298330093349.0418,
+      "avg_volume": 9688475
+    },
+    "ANET": {
+      "name": "Arista Networks",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 154.27,
+      "market_cap": 194252074580.01224,
+      "avg_volume": 11476765
+    },
+    "C": {
+      "name": "Citigroup",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 132.47,
+      "market_cap": 225937781310.85312,
+      "avg_volume": 10500790
     },
     "APH": {
       "name": "Amphenol",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 146.77,
-      "market_cap": 180561514748.77863,
-      "avg_volume": 12273195
+      "price": 138.81,
+      "market_cap": 170768840306.94794,
+      "avg_volume": 12181395
     },
     "BA": {
       "name": "Boeing",
       "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 217.42,
-      "market_cap": 171392691362.59534,
-      "avg_volume": 7816195
-    },
-    "RKLB": {
-      "name": "Rocket Lab",
-      "sector": "Industrials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 114.7,
-      "market_cap": 74947006063.75,
-      "avg_volume": 31861726
+      "price": 215.45,
+      "market_cap": 169839734808.2422,
+      "avg_volume": 7632055
     },
     "LIN": {
       "name": "Linde plc",
       "sector": "Materials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 507.45,
-      "market_cap": 234618148103.38806,
-      "avg_volume": 2184675
+      "price": 507.9,
+      "market_cap": 234826195927.05597,
+      "avg_volume": 2232050
     },
-    "SNOW": {
-      "name": "Snowflake Inc.",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 241.28,
-      "market_cap": 84632788000.0,
-      "avg_volume": 11704234
-    },
-    "VRT": {
-      "name": "Vertiv",
+    "RTX": {
+      "name": "RTX Corporation",
       "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 331.44,
-      "market_cap": 124420527678.72,
-      "avg_volume": 5756297
-    },
-    "TMO": {
-      "name": "Thermo Fisher Scientific",
-      "sector": "Healthcare",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 482.03,
-      "market_cap": 179132694320.31052,
-      "avg_volume": 2743610
+      "price": 180.99,
+      "market_cap": 243736241031.273,
+      "avg_volume": 5742070
     },
     "MCD": {
       "name": "McDonald's",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 272.72,
-      "market_cap": 193769158733.79672,
-      "avg_volume": 4415660
+      "price": 279.84,
+      "market_cap": 198827956980.60983,
+      "avg_volume": 4356265
     },
-    "COHR": {
-      "name": "Coherent Corp.",
-      "sector": "Technology",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 421.9,
-      "market_cap": 82540228335.81235,
-      "avg_volume": 6478850
-    },
-    "SHOP": {
-      "name": "Shopify",
-      "sector": "Unknown",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 112.94,
-      "market_cap": 150579840944.4,
-      "avg_volume": 12426606
-    },
-    "UBER": {
-      "name": "Uber",
+    "RKLB": {
+      "name": "Rocket Lab",
       "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 71.69,
-      "market_cap": 146990604728.72998,
-      "avg_volume": 19970572
+      "price": 110.08,
+      "market_cap": 68780046392.07726,
+      "avg_volume": 31790650
+    },
+    "PM": {
+      "name": "Philip Morris International",
+      "sector": "Consumer Staples",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 178.29,
+      "market_cap": 277875446189.38293,
+      "avg_volume": 4776155
+    },
+    "SNOW": {
+      "name": "Snowflake Inc.",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 238.26,
+      "market_cap": 82580914096.06934,
+      "avg_volume": 11421315
+    },
+    "TMO": {
+      "name": "Thermo Fisher Scientific",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 472.8,
+      "market_cap": 175702624115.60516,
+      "avg_volume": 2703335
+    },
+    "PEP": {
+      "name": "PepsiCo",
+      "sector": "Consumer Staples",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 141.92,
+      "market_cap": 193996259391.77634,
+      "avg_volume": 7845075
     },
     "NEE": {
       "name": "NextEra Energy",
       "sector": "Utilities",
       "asset_class": "stock",
       "tradable": true,
-      "price": 85.68,
-      "market_cap": 178694667709.91626,
-      "avg_volume": 13330700
+      "price": 85.84,
+      "market_cap": 179028356293.00507,
+      "avg_volume": 13438520
+    },
+    "AXP": {
+      "name": "American Express",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 310.66,
+      "market_cap": 211971535281.13406,
+      "avg_volume": 3132990
+    },
+    "VRT": {
+      "name": "Vertiv",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 300.51,
+      "market_cap": 115428544047.22266,
+      "avg_volume": 5849355
+    },
+    "UBER": {
+      "name": "Uber",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 70.71,
+      "market_cap": 143937204345.58344,
+      "avg_volume": 19468855
+    },
+    "TJX": {
+      "name": "TJX Companies",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 160.71,
+      "market_cap": 177537058933.49893,
+      "avg_volume": 6623390
+    },
+    "VZ": {
+      "name": "Verizon",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 45.37,
+      "market_cap": 189445103286.72192,
+      "avg_volume": 21216570
+    },
+    "SHOP": {
+      "name": "Shopify",
+      "sector": "Unknown",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 109.54,
+      "market_cap": 142145087167.4383,
+      "avg_volume": 11700415
+    },
+    "ABT": {
+      "name": "Abbott Laboratories",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 91.07,
+      "market_cap": 158626923403.22083,
+      "avg_volume": 11972965
+    },
+    "COHR": {
+      "name": "Coherent Corp.",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 376.99,
+      "market_cap": 73754065713.24976,
+      "avg_volume": 6165435
+    },
+    "TMUS": {
+      "name": "T-Mobile US",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 178.1,
+      "market_cap": 192740666702.9534,
+      "avg_volume": 4788340
     },
     "HOOD": {
       "name": "Robinhood Markets",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 82.85,
-      "market_cap": 79541611684.81,
-      "avg_volume": 25963537
+      "price": 82.47,
+      "market_cap": 74264653150.03934,
+      "avg_volume": 26694870
     },
-    "DDOG": {
-      "name": "Datadog",
-      "sector": "Technology",
+    "SCHW": {
+      "name": "Charles Schwab Corporation",
+      "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 250.33,
-      "market_cap": 86711902040.4,
-      "avg_volume": 7608737
+      "price": 88.84,
+      "market_cap": 154504792072.97556,
+      "avg_volume": 11849625
+    },
+    "AMGN": {
+      "name": "Amgen",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 349.58,
+      "market_cap": 188671211177.86066,
+      "avg_volume": 2454765
+    },
+    "ISRG": {
+      "name": "Intuitive Surgical",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 422.06,
+      "market_cap": 149477968229.86462,
+      "avg_volume": 2565940
     },
     "BKNG": {
       "name": "Booking Holdings",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 167.49,
-      "market_cap": 129784393502.17438,
-      "avg_volume": 7571920
+      "price": 165.84,
+      "market_cap": 128505836988.55042,
+      "avg_volume": 7556505
+    },
+    "ETN": {
+      "name": "Eaton Corporation",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 395.94,
+      "market_cap": 153743502947.99805,
+      "avg_volume": 2588300
     },
     "INTU": {
       "name": "Intuit",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 301.98,
-      "market_cap": 82602706265.16724,
-      "avg_volume": 6334150
+      "price": 296.76,
+      "market_cap": 81174842791.25977,
+      "avg_volume": 6539605
     },
-    "HPE": {
-      "name": "Hewlett Packard Enterprise",
+    "GILD": {
+      "name": "Gilead Sciences",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 129.16,
+      "market_cap": 160361169472.60468,
+      "avg_volume": 7520170
+    },
+    "T": {
+      "name": "AT&T",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 22.75,
+      "market_cap": 158074708496.25,
+      "avg_volume": 42362455
+    },
+    "DIS": {
+      "name": "Walt Disney Company (The)",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 99.71,
+      "market_cap": 173147552497.2163,
+      "avg_volume": 8275795
+    },
+    "DE": {
+      "name": "Deere & Company",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 583.44,
+      "market_cap": 157591393269.5216,
+      "avg_volume": 1543790
+    },
+    "HON": {
+      "name": "Honeywell",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 213.97,
+      "market_cap": 135582758645.93234,
+      "avg_volume": 4816030
+    },
+    "UNP": {
+      "name": "Union Pacific Corporation",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 272.32,
+      "market_cap": 161679986512.64545,
+      "avg_volume": 3109725
+    },
+    "DDOG": {
+      "name": "Datadog",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 55.15,
-      "market_cap": 71096487042.48999,
-      "avg_volume": 35940861
+      "price": 234.11,
+      "market_cap": 83333840064.05086,
+      "avg_volume": 6652430
     },
-    "ALAB": {
-      "name": "Astera Labs",
-      "sector": "Technology",
+    "PFE": {
+      "name": "Pfizer",
+      "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 363.54,
-      "market_cap": 61372612558.950005,
-      "avg_volume": 6160797
+      "price": 26.04,
+      "market_cap": 148413531378.757,
+      "avg_volume": 33321045
     },
     "ADBE": {
       "name": "Adobe Inc.",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 258.42,
-      "market_cap": 104453369427.49023,
-      "avg_volume": 4961545
+      "price": 251.44,
+      "market_cap": 101632048986.8164,
+      "avg_volume": 4982930
     },
-    "NET": {
-      "name": "Cloudflare",
+    "PDD": {
+      "name": "PDD Holdings",
+      "sector": "Unknown",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 85.07,
+      "market_cap": 121088336587.95387,
+      "avg_volume": 12102295
+    },
+    "HPE": {
+      "name": "Hewlett Packard Enterprise",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 265.33,
-      "market_cap": 94955172594.08,
-      "avg_volume": 5235872
+      "price": 49.2,
+      "market_cap": 65150814243.48711,
+      "avg_volume": 37311115
     },
     "SPOT": {
       "name": "Spotify",
       "sector": "Communication Services",
       "asset_class": "stock",
       "tradable": true,
-      "price": 487.54,
-      "market_cap": 101489949708.37999,
-      "avg_volume": 2369431
+      "price": 496.95,
+      "market_cap": 102182891823.96051,
+      "avg_volume": 2335395
+    },
+    "WELL": {
+      "name": "Welltower",
+      "sector": "Real Estate",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 206.93,
+      "market_cap": 146074871968.22815,
+      "avg_volume": 3876850
+    },
+    "SPGI": {
+      "name": "S&P Global",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 424.44,
+      "market_cap": 125634240722.65625,
+      "avg_volume": 2194630
+    },
+    "DHR": {
+      "name": "Danaher Corporation",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 184.3,
+      "market_cap": 130442128716.04454,
+      "avg_volume": 4768450
+    },
+    "ACN": {
+      "name": "Accenture",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 178.25,
+      "market_cap": 109701317091.75,
+      "avg_volume": 5834705
+    },
+    "NET": {
+      "name": "Cloudflare",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 250.11,
+      "market_cap": 88405443252.90868,
+      "avg_volume": 5043660
+    },
+    "SYK": {
+      "name": "Stryker Corporation",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 305.66,
+      "market_cap": 117178051916.82904,
+      "avg_volume": 3067040
+    },
+    "COP": {
+      "name": "ConocoPhillips",
+      "sector": "Energy",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 117.14,
+      "market_cap": 142710959236.39233,
+      "avg_volume": 6524735
+    },
+    "ALAB": {
+      "name": "Astera Labs",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 317.06,
+      "market_cap": 54346600720.86359,
+      "avg_volume": 6201270
+    },
+    "MDT": {
+      "name": "Medtronic",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 81.67,
+      "market_cap": 104854882659.01642,
+      "avg_volume": 12196895
+    },
+    "CVS": {
+      "name": "CVS Health",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 95.93,
+      "market_cap": 122399706949.89212,
+      "avg_volume": 8703725
     },
     "MELI": {
       "name": "Mercado Libre",
       "sector": "Unknown",
       "asset_class": "stock",
       "tradable": true,
-      "price": 1634.78,
-      "market_cap": 82878740675.229,
-      "avg_volume": 794295
+      "price": 1607.8,
+      "market_cap": 81510931695.04834,
+      "avg_volume": 775835
     },
     "CEG": {
       "name": "Constellation Energy",
       "sector": "Utilities",
       "asset_class": "stock",
       "tradable": true,
-      "price": 267.24,
-      "market_cap": 94485622678.02998,
-      "avg_volume": 4260127
+      "price": 254.83,
+      "market_cap": 91000307645.98332,
+      "avg_volume": 4343945
     },
-    "NXPI": {
-      "name": "NXP Semiconductors",
+    "FTNT": {
+      "name": "Fortinet",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 322.22,
-      "market_cap": 81351231383.57224,
-      "avg_volume": 3788445
+      "price": 144.68,
+      "market_cap": 105999563843.80292,
+      "avg_volume": 6460445
     },
-    "CIEN": {
-      "name": "Ciena",
+    "COF": {
+      "name": "Capital One",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 180.67,
+      "market_cap": 112429635965.15788,
+      "avg_volume": 4812620
+    },
+    "MCK": {
+      "name": "McKesson Corporation",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 775.66,
+      "market_cap": 93237470970.52386,
+      "avg_volume": 1348950
+    },
+    "CDNS": {
+      "name": "Cadence Design Systems",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 535.63,
-      "market_cap": 75843896397.89429,
-      "avg_volume": 2427505
+      "price": 376.19,
+      "market_cap": 103759221713.3789,
+      "avg_volume": 2430590
     },
     "MSTR": {
       "name": "MicroStrategy",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 129.37,
-      "market_cap": 45526793435.26196,
-      "avg_volume": 16346465
+      "price": 120.44,
+      "market_cap": 42384226014.11902,
+      "avg_volume": 17641445
     },
-    "TER": {
-      "name": "Teradyne",
+    "NXPI": {
+      "name": "NXP Semiconductors",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 406.86,
-      "market_cap": 63690741738.221924,
-      "avg_volume": 3710580
+      "price": 295.96,
+      "market_cap": 74721338383.49435,
+      "avg_volume": 3962505
     },
-    "ASTS": {
-      "name": "AST SpaceMobile",
-      "sector": "Communication Services",
+    "PWR": {
+      "name": "Quanta Services",
+      "sector": "Industrials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 107.73,
-      "market_cap": 32052499432.070004,
-      "avg_volume": 27269879
+      "price": 695.11,
+      "market_cap": 104308307973.24329,
+      "avg_volume": 1161570
+    },
+    "CIEN": {
+      "name": "Ciena",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 488.21,
+      "market_cap": 69107550840.06134,
+      "avg_volume": 2460025
+    },
+    "SNPS": {
+      "name": "Synopsys",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 464.85,
+      "market_cap": 89009165394.94705,
+      "avg_volume": 1988035
+    },
+    "CME": {
+      "name": "CME Group",
+      "sector": "Financials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 257.4,
+      "market_cap": 93004473902.06094,
+      "avg_volume": 3354920
     },
     "BSX": {
       "name": "Boston Scientific",
       "sector": "Healthcare",
       "asset_class": "stock",
       "tradable": true,
-      "price": 48.85,
-      "market_cap": 72608448226.15198,
-      "avg_volume": 22960630
+      "price": 48.55,
+      "market_cap": 72162542806.45099,
+      "avg_volume": 22696815
     },
-    "F": {
-      "name": "Ford Motor Company",
+    "NEM": {
+      "name": "Newmont",
+      "sector": "Materials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 99.71,
+      "market_cap": 106445685121.06625,
+      "avg_volume": 7423485
+    },
+    "TER": {
+      "name": "Teradyne",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 357.93,
+      "market_cap": 56031134898.11096,
+      "avg_volume": 3733950
+    },
+    "MPWR": {
+      "name": "Monolithic Power Systems",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 1481.05,
+      "market_cap": 72762903289.23999,
+      "avg_volume": 693935
+    },
+    "FCX": {
+      "name": "Freeport-McMoRan",
+      "sector": "Materials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 63.37,
+      "market_cap": 91098167109.5704,
+      "avg_volume": 12882955
+    },
+    "ASTS": {
+      "name": "AST SpaceMobile",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 93.6,
+      "market_cap": 27962660992.949196,
+      "avg_volume": 27503675
+    },
+    "CMCSA": {
+      "name": "Comcast",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 23.82,
+      "market_cap": 85090483137.58237,
+      "avg_volume": 32835150
+    },
+    "ROST": {
+      "name": "Ross Stores",
       "sector": "Consumer Discretionary",
       "asset_class": "stock",
       "tradable": true,
-      "price": 15.34,
-      "market_cap": 61125185552.21584,
-      "avg_volume": 86398980
+      "price": 230.37,
+      "market_cap": 73898334911.80615,
+      "avg_volume": 3762560
+    },
+    "RCL": {
+      "name": "Royal Caribbean Group",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 280.0,
+      "market_cap": 75094593840.0,
+      "avg_volume": 2999545
     },
     "ON": {
       "name": "ON Semiconductor",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 131.82,
-      "market_cap": 51252039485.29962,
-      "avg_volume": 11786425
+      "price": 117.26,
+      "market_cap": 45591063007.23322,
+      "avg_volume": 11777250
     },
     "COIN": {
       "name": "Coinbase",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 163.22,
-      "market_cap": 43241815523.58,
-      "avg_volume": 9707057
+      "price": 152.4,
+      "market_cap": 40151419130.3631,
+      "avg_volume": 10092130
+    },
+    "NKE": {
+      "name": "Nike, Inc.",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 42.98,
+      "market_cap": 63648524000.44371,
+      "avg_volume": 22340930
+    },
+    "FLEX": {
+      "name": "Flex Ltd.",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 151.92,
+      "market_cap": 55660133391.30199,
+      "avg_volume": 6444790
+    },
+    "DASH": {
+      "name": "DoorDash",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 156.8,
+      "market_cap": 68320696939.308014,
+      "avg_volume": 5004295
+    },
+    "REGN": {
+      "name": "Regeneron Pharmaceuticals",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 635.45,
+      "market_cap": 66619964164.17334,
+      "avg_volume": 1205235
     },
     "MCHP": {
       "name": "Microchip Technology",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 96.3,
-      "market_cap": 52202236414.59468,
-      "avg_volume": 11598045
+      "price": 88.34,
+      "market_cap": 47887281698.38638,
+      "avg_volume": 11791420
     },
     "SMCI": {
       "name": "Supermicro",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 46.9,
-      "market_cap": 28206527723.491776,
-      "avg_volume": 43173700
+      "price": 41.64,
+      "market_cap": 25043065223.40329,
+      "avg_volume": 42555230
     },
-    "CRCL": {
-      "name": "Circle Internet Group",
-      "sector": "Technology",
+    "VST": {
+      "name": "Vistra Corp.",
+      "sector": "Utilities",
       "asset_class": "stock",
       "tradable": true,
-      "price": 90.13,
-      "market_cap": 22506073756.2,
-      "avg_volume": 17379685
+      "price": 148.76,
+      "market_cap": 50159262087.481384,
+      "avg_volume": 5497935
+    },
+    "RDDT": {
+      "name": "Reddit",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 173.45,
+      "market_cap": 33390692400.509033,
+      "avg_volume": 5430165
     },
     "MDB": {
       "name": "MongoDB Inc.",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 368.32,
-      "market_cap": 30578610006.86,
-      "avg_volume": 3126881
+      "price": 350.74,
+      "market_cap": 28210693290.511963,
+      "avg_volume": 3036905
     },
-    "AKAM": {
-      "name": "Akamai Technologies",
+    "WDAY": {
+      "name": "Workday, Inc.",
       "sector": "Technology",
       "asset_class": "stock",
       "tradable": true,
-      "price": 158.98,
-      "market_cap": 23113378378.82634,
-      "avg_volume": 7272930
+      "price": 144.28,
+      "market_cap": 35633333248.6387,
+      "avg_volume": 5628695
+    },
+    "CRCL": {
+      "name": "Circle Internet Group",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 80.28,
+      "market_cap": 19955683384.962463,
+      "avg_volume": 17541190
+    },
+    "SATS": {
+      "name": "EchoStar",
+      "sector": "Communication Services",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 116.28,
+      "market_cap": 33699512030.86377,
+      "avg_volume": 6883350
+    },
+    "FSLR": {
+      "name": "First Solar",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 279.01,
+      "market_cap": 29980563859.979248,
+      "avg_volume": 3088110
     },
     "SOFI": {
       "name": "SoFi",
       "sector": "Financials",
       "asset_class": "stock",
       "tradable": true,
-      "price": 16.68,
-      "market_cap": 21999011580.0,
-      "avg_volume": 69286986
+      "price": 16.03,
+      "market_cap": 20562342316.788483,
+      "avg_volume": 70441210
+    },
+    "AKAM": {
+      "name": "Akamai Technologies",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 149.32,
+      "market_cap": 21708956608.154846,
+      "avg_volume": 6894320
+    },
+    "ZS": {
+      "name": "Zscaler",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 130.78,
+      "market_cap": 21148371482.100677,
+      "avg_volume": 7329740
     },
     "BTC/USD": {
       "name": "Bitcoin",
@@ -1180,6 +1683,27 @@
       "asset_class": "crypto",
       "category": "DeFi",
       "tradable": false
+    },
+    "AAVE/USD": {
+      "name": "Aave",
+      "sector": "Crypto",
+      "asset_class": "crypto",
+      "category": "DeFi",
+      "tradable": true
+    },
+    "CRV/USD": {
+      "name": "Curve",
+      "sector": "Crypto",
+      "asset_class": "crypto",
+      "category": "DeFi",
+      "tradable": true
+    },
+    "SUSHI/USD": {
+      "name": "SushiSwap",
+      "sector": "Crypto",
+      "asset_class": "crypto",
+      "category": "DeFi",
+      "tradable": true
     }
   }
 }
