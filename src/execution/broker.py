@@ -352,6 +352,30 @@ class Broker:
                              "UNPROTECTED until next scan", symbol)
             return False
 
+    def protective_levels(self, symbol: str) -> tuple[float | None, float | None]:
+        """Read (stop, target) from a symbol's working OCO/bracket exit legs.
+
+        Lets the position manager adopt an existing position using its live
+        protection rather than guessing. Returns (None, None) if unprotected.
+        """
+        try:
+            q = symbol.replace("/", "")
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[q], nested=True)
+            stop = target = None
+            for o in self._client.get_orders(filter=req):
+                nodes = [o] + list(getattr(o, "legs", None) or [])
+                for n in nodes:
+                    sp = getattr(n, "stop_price", None)
+                    lp = getattr(n, "limit_price", None)
+                    if sp:
+                        stop = float(sp)
+                    if lp:
+                        target = float(lp)
+            return stop, target
+        except Exception:
+            logger.exception("protective_levels failed for %s", symbol)
+            return None, None
+
     def close_position(self, symbol: str) -> bool:
         """Close a single position (used by the time-based exit).
 

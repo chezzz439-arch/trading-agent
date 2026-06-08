@@ -190,6 +190,12 @@ class TradingAgent:
         # closed/canceled while the agent was offline are dropped silently, so we
         # never replay backdated "trade closed" alerts for old trades on restart.
         self._reconcile_managed_on_startup()
+        # Adopt any broker position the manager isn't tracking (e.g. opened before
+        # P9, or whose state was lost) so it gets full lifecycle management.
+        try:
+            self._adopt_orphan_positions(self.broker.get_positions())
+        except Exception:
+            logger.exception("Adopting orphan positions failed")
         if self.options is not None:
             self.option_positions = self.option_store.load()
             for op in self.option_positions.values():
@@ -557,6 +563,48 @@ class TradingAgent:
             logger.info("Startup reconcile: dropped %d stale managed position(s) "
                         "closed/canceled while offline (no alert): %s",
                         len(dropped), ", ".join(dropped))
+            self.position_store.save(self.managed)
+
+    def _adopt_orphan_positions(self, positions) -> None:
+        """Register broker positions the manager isn't tracking as ManagedPositions.
+
+        Reconstructs lifecycle state from the live position + its working OCO
+        stop/target (or arms one if unprotected), so legacy/orphaned positions get
+        scale-outs, breakeven and trailing instead of only a static exit. Long-only:
+        any legacy short is left untouched. Runs at startup.
+        """
+        from src.execution.position_manager import ManagedPosition
+        adopted = []
+        for p in positions:
+            sym = p.symbol
+            if sym in self.managed or sym.replace("/", "") in self.managed:
+                continue
+            side = "long" if "LONG" in str(getattr(p, "side", "")).upper() else "short"
+            if side == "short":
+                continue
+            qty = abs(float(p.qty))
+            entry = float(p.avg_entry_price)
+            stop, target = self.broker.protective_levels(sym)
+            df = self.feed.get_bars(sym, "1Day", 60)
+            tech = self.technical.analyze(df) if (df is not None and not df.empty) else None
+            atr = (tech.values.get("atr14") if tech else None) or entry * 0.02
+            if stop is None or target is None:
+                # No live protection -> derive from ATR off the last price and arm it.
+                ref = float(df["close"].iloc[-1]) if (df is not None and not df.empty) else entry
+                stop = round(ref - 1.5 * atr, 2)
+                target = round(ref + 4.5 * atr, 2)
+                self.broker.arm_protection(sym, side, qty, stop, target)
+            rps = abs(entry - stop) or entry * 0.01
+            self.managed[sym] = ManagedPosition(
+                symbol=sym, side=side, entry=entry, initial_stop=stop, current_stop=stop,
+                target=target, risk_per_share=rps, initial_qty=qty, remaining_qty=qty,
+                atr=atr, score=0.0, regime="adopted", fractional=is_crypto(sym),
+                entry_time="", confirmed=True)
+            self._open_risk[sym] = rps * qty
+            adopted.append(sym)
+        if adopted:
+            logger.info("Adopted %d untracked position(s) into P9 management: %s",
+                        len(adopted), ", ".join(adopted))
             self.position_store.save(self.managed)
 
     def _manage_positions(self, positions, equity) -> None:
