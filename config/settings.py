@@ -62,7 +62,7 @@ MAX_POSITION_PCT: float = 0.10     # cap a single position at 10% of equity
 # --------------------------------------------------------------------------- #
 # Portfolio risk
 # --------------------------------------------------------------------------- #
-MAX_CONCURRENT_POSITIONS: int = 8
+MAX_CONCURRENT_POSITIONS: int = 15
 DAILY_LOSS_LIMIT: float = 0.03      # kill switch at -3% from day-start equity
 WEEKLY_LOSS_LIMIT: float = 0.07     # kill switch at -7% from week-start equity
 MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
