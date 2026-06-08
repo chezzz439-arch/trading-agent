@@ -594,15 +594,30 @@ class TradingAgent:
         self.position_store.save(self.managed)
 
     def _execute_action(self, mp, a, price) -> None:
+        """Carry out a manager action against the broker.
+
+        Entries are bracket orders whose stop/target legs hold the full quantity,
+        so any share-moving action must first cancel those legs (free the shares),
+        then act, then RE-ARM an OCO stop+target on the remainder so the position
+        is never left naked. ``mp.remaining_qty`` / ``mp.current_stop`` are already
+        updated by the manager before the action reaches here.
+        """
         d = 1 if mp.side == "long" else -1
         try:
             if a.kind == "scale_out":
-                self.broker.scale_out(mp.symbol, mp.side, a.qty)
+                self.broker.cancel_open_orders(mp.symbol)        # free bracket-held shares
+                self.broker.scale_out(mp.symbol, mp.side, a.qty)  # take the tranche
+                # Re-protect what's left (no-op if fully closed / crypto).
+                self.broker.arm_protection(mp.symbol, mp.side, mp.remaining_qty,
+                                           mp.current_stop, mp.target)
                 self.notifier.scaled_out(symbol=mp.symbol, tag=a.tag, qty=a.qty,
                                          price=a.price, realized_pnl=a.realized_pnl,
                                          remaining=mp.remaining_qty)
             elif a.kind == "move_stop":
-                self.broker.replace_stop(mp.symbol, a.new_stop)
+                # Replace the bracket with an OCO at the new stop + existing target.
+                self.broker.cancel_open_orders(mp.symbol)
+                self.broker.arm_protection(mp.symbol, mp.side, mp.remaining_qty,
+                                           a.new_stop, mp.target)
                 if a.tag == "breakeven":
                     protected = max(0.0, d * (a.new_stop - mp.entry)) * mp.remaining_qty
                     self.notifier.stop_breakeven(symbol=mp.symbol, new_stop=a.new_stop,
@@ -612,7 +627,7 @@ class TradingAgent:
                     self.notifier.trailing_moved(symbol=mp.symbol, new_stop=a.new_stop,
                                                  current_profit=profit)
             elif a.kind == "time_exit":
-                self.broker.close_position(mp.symbol)
+                self.broker.close_position(mp.symbol)            # cancels orders then liquidates
             # close_hit: the broker bracket already executed the fill.
         except Exception:
             logger.exception("Executing %s action for %s failed", a.kind, mp.symbol)

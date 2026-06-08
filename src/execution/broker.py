@@ -303,9 +303,63 @@ class Broker:
             logger.exception("scale_out failed for %s", symbol)
             return None
 
-    def close_position(self, symbol: str) -> bool:
-        """Close a single position (used by the time-based exit)."""
+    def cancel_open_orders(self, symbol: str) -> int:
+        """Cancel every working order for ``symbol``, freeing its shares.
+
+        A bracketed position has its full quantity ``held_for_orders`` by the
+        stop/target legs, so the position manager must clear them before it can
+        scale out or re-price a stop. Returns how many orders were canceled.
+        """
+        n = 0
         try:
+            q = symbol.replace("/", "")
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[q])
+            for o in self._client.get_orders(filter=req):
+                try:
+                    self._client.cancel_order_by_id(o.id)
+                    n += 1
+                except Exception:
+                    logger.warning("%s: could not cancel order %s", symbol,
+                                   getattr(o, "id", "?"))
+        except Exception:
+            logger.exception("cancel_open_orders failed for %s", symbol)
+        return n
+
+    def arm_protection(self, symbol: str, side: str, qty: float,
+                       stop: float, target: float) -> bool:
+        """Attach an OCO stop+target to an existing position's ``qty`` shares.
+
+        Used to re-protect the remainder after the manager cancels a bracket to
+        scale out or move a stop, so the position is never left naked. Crypto
+        can't OCO/bracket -> no-op. Returns success.
+        """
+        if _is_crypto(symbol) or qty <= 0:
+            return False
+        try:
+            exit_side = OrderSide.SELL if side == "long" else OrderSide.BUY
+            req = LimitOrderRequest(
+                symbol=symbol.replace("/", ""), qty=qty, side=exit_side,
+                time_in_force=TimeInForce.DAY, order_class=OrderClass.OCO,
+                limit_price=_round_price(target),
+                take_profit=TakeProfitRequest(limit_price=_round_price(target)),
+                stop_loss=StopLossRequest(stop_price=_round_price(stop)))
+            self._client.submit_order(req)
+            logger.info("%s: re-armed OCO protection qty=%s stop=%.2f target=%.2f",
+                        symbol, qty, _round_price(stop), _round_price(target))
+            return True
+        except Exception:
+            logger.exception("arm_protection failed for %s — POSITION MAY BE "
+                             "UNPROTECTED until next scan", symbol)
+            return False
+
+    def close_position(self, symbol: str) -> bool:
+        """Close a single position (used by the time-based exit).
+
+        Cancels working orders first so held-for-orders shares are freed; Alpaca's
+        close endpoint then liquidates the full quantity.
+        """
+        try:
+            self.cancel_open_orders(symbol)
             self._client.close_position(symbol.replace("/", ""))
             logger.info("%s: position closed", symbol)
             return True
