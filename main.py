@@ -186,6 +186,10 @@ class TradingAgent:
         # positions re-enter (which let the weekend order-pileup happen).
         for sym, mp in self.managed.items():
             self._open_risk[sym] = mp.risk_per_share * mp.initial_qty
+        # Reconcile against the broker before the first scan: positions that
+        # closed/canceled while the agent was offline are dropped silently, so we
+        # never replay backdated "trade closed" alerts for old trades on restart.
+        self._reconcile_managed_on_startup()
         if self.options is not None:
             self.option_positions = self.option_store.load()
             for op in self.option_positions.values():
@@ -517,6 +521,44 @@ class TradingAgent:
     # ------------------------------------------------------------------ #
     # P9 stateful position management
     # ------------------------------------------------------------------ #
+    def _reconcile_managed_on_startup(self) -> None:
+        """Drop reloaded managed positions the broker no longer has, so a restart
+        never replays backdated 'trade closed' alerts for trades that ended while
+        the agent was offline.
+
+        A managed position is kept only if it still has a live broker position
+        (mark it confirmed) or a still-working entry order (a pending fill). One
+        with neither closed or was canceled while we were down — drop it silently:
+        it is NOT a new event, so it must not alert. Closes that happen DURING a
+        live session are detected by `_manage_positions` and alert as normal.
+        """
+        if not self.managed:
+            return
+        try:
+            live: set[str] = set()
+            for p in self.broker.get_positions():
+                live.add(p.symbol)
+                live.add(p.symbol.replace("/", ""))
+            pending = self.broker.open_order_symbols()
+        except Exception:
+            logger.exception("Startup reconcile failed — keeping managed positions as-is")
+            return
+        dropped = []
+        for sym in list(self.managed.keys()):
+            mp = self.managed[sym]
+            bare = sym.replace("/", "")
+            if sym in live or bare in live:
+                mp.confirmed = True                       # really open -> manage it
+            elif sym not in pending and bare not in pending:
+                self.managed.pop(sym, None)               # gone while offline
+                self._open_risk.pop(sym, None)
+                dropped.append(sym)
+        if dropped:
+            logger.info("Startup reconcile: dropped %d stale managed position(s) "
+                        "closed/canceled while offline (no alert): %s",
+                        len(dropped), ", ".join(dropped))
+            self.position_store.save(self.managed)
+
     def _manage_positions(self, positions, equity) -> None:
         if not self.managed:
             return
