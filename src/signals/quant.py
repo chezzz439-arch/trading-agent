@@ -112,6 +112,33 @@ def beta_to_market(series: pd.Series, market: pd.Series) -> Optional[float]:
         return None
 
 
+def relative_strength(series: pd.Series, market: Optional[pd.Series]) -> dict[str, Optional[float]]:
+    """Excess return of ``series`` over the market on 20 and 60 bars.
+
+    ``rel_strength_N = symbol_return_N - market_return_N``. ``rs_outperform`` is
+    True only when the symbol beats the market on BOTH horizons — the momentum
+    strategy's relative-strength filter. Returns Nones (neutral) without a market
+    series so the scorer doesn't veto when SPY is unavailable.
+    """
+    out: dict[str, Optional[float]] = {"rel_strength_20": None, "rel_strength_60": None,
+                                       "rs_outperform": None}
+    if market is None:
+        return out
+
+    def _excess(n: int) -> Optional[float]:
+        if len(series) <= n or len(market) <= n:
+            return None
+        sym_ret = float(series.iloc[-1] / series.iloc[-1 - n] - 1.0)
+        mkt_ret = float(market.iloc[-1] / market.iloc[-1 - n] - 1.0)
+        return sym_ret - mkt_ret
+
+    rs20, rs60 = _excess(20), _excess(60)
+    out["rel_strength_20"], out["rel_strength_60"] = rs20, rs60
+    if rs20 is not None and rs60 is not None:
+        out["rs_outperform"] = rs20 > 0 and rs60 > 0
+    return out
+
+
 def linreg_trend(series: pd.Series, window: int = 50) -> dict[str, Optional[float]]:
     """Linear-regression slope and R^2 over the last ``window`` bars."""
     try:
@@ -280,6 +307,9 @@ class QuantAnalysis:
             v["zscore_50"] = zscore(c, 50)
             v["percentile_252"] = percentile_rank(c, 252)
             v["beta_spy"] = beta_to_market(c, market_df["close"]) if market_df is not None else None
+            # Relative strength vs SPY (excess return, 20 & 60 bars) — the core
+            # momentum filter. None -> neutral when no market series is supplied.
+            v.update(relative_strength(c, market_df["close"] if market_df is not None else None))
             v.update(linreg_trend(c, 50))
             v.update(standard_error_channel(c, 50))
             v["half_life"] = mean_reversion_half_life(c)

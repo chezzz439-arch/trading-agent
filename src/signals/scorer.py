@@ -31,9 +31,12 @@ from src.signals.technical import TechnicalResult
 
 logger = logging.getLogger(__name__)
 
+# Pure-momentum-long-only weights. Mean-reversion was removed from `statistical`
+# (15->12) and `regime` (15->8); the freed 10 points fund the new
+# `relative_strength` dimension (must outperform SPY). Sums to 100.
 MAX_POINTS = {
-    "technical": 20, "momentum": 15, "mtf": 15, "statistical": 15,
-    "regime": 15, "ml": 10, "risk_reward": 10,
+    "technical": 20, "momentum": 15, "mtf": 15, "statistical": 12,
+    "regime": 8, "ml": 10, "risk_reward": 10, "relative_strength": 10,
 }
 
 
@@ -45,10 +48,14 @@ class TradeScore:
     breakdown: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     min_score: float = 70.0
+    # Hard momentum gates: a short (no shorts ever) or a long not outperforming
+    # SPY is vetoed regardless of score. Both entry paths check `passed`, so the
+    # gate applies live and in backtest from this one place.
+    rs_veto: bool = False
 
     @property
     def passed(self) -> bool:
-        return self.total >= self.min_score
+        return self.total >= self.min_score and not self.rs_veto
 
 
 class MasterScorer:
@@ -82,13 +89,18 @@ class MasterScorer:
     ) -> TradeScore:
         s = TradeScore(symbol=symbol, side=side, min_score=self.min_score)
         b = s.breakdown
+        # Hard gate 1: long-only, no shorts ever.
+        if side != "long":
+            s.rs_veto = True
+            s.notes.append("vetoed: shorts disabled (long-only momentum)")
         b["technical"] = self._technical(side, technical, s)
         b["momentum"] = self._momentum(side, technical, s)
         b["mtf"] = self._mtf(side, mtf, s)
-        b["statistical"] = self._statistical(side, quant, regime, s)
+        b["statistical"] = self._statistical(side, quant, s)
         b["regime"] = self._regime(side, regime, s)
         b["ml"] = self._ml(side, ml, s)
         b["risk_reward"] = self._risk_reward(plan, s)
+        b["relative_strength"] = self._relative_strength(quant, s)
         # Research is additive to the technical score and already clamped to
         # +/-25 by the ResearchEngine. It's side-aware: a bullishness score added
         # for longs, sign-flipped for shorts. Live-only (None in backtest -> 0).
@@ -103,17 +115,13 @@ class MasterScorer:
         if t is None:
             return MAX_POINTS["technical"] * 0.5
         pts = 0.0
-        # MA alignment (max 10): how many of the key EMAs price sits on the
-        # correct side of.
+        # MA alignment (max 10): price above the key EMAs (uptrend structure).
         above = t.signals.get("above_key_mas", 0)
-        ma_pts = above / 4 * 10 if side == "long" else (4 - above) / 4 * 10
-        pts += ma_pts
-        # Pattern confirmation (max 5).
-        if side == "long" and t.signals.get("bullish_pattern"):
+        pts += above / 4 * 10
+        # Bullish pattern confirmation (max 5).
+        if t.signals.get("bullish_pattern"):
             pts += 5
-        elif side == "short" and t.signals.get("bearish_pattern"):
-            pts += 5
-        # Volume confirmation (max 5).
+        # Volume confirmation (max 5): entry-day volume above its 20-day average.
         if t.signals.get("volume_confirms"):
             pts += 5
         return round(min(pts, MAX_POINTS["technical"]), 1)
@@ -122,23 +130,16 @@ class MasterScorer:
         if t is None:
             return MAX_POINTS["momentum"] * 0.5
         pts = 0.0
-        # RSI not stretched against us (max 6).
-        if side == "long" and not t.signals.get("rsi_overbought"):
+        # Bullish RSI without being overbought (max 6).
+        if not t.signals.get("rsi_overbought"):
             pts += 6 if t.signals.get("rsi_bull") else 3
-        elif side == "short" and not t.signals.get("rsi_oversold"):
-            pts += 6 if t.signals.get("rsi_bear") else 3
-        # MACD histogram direction (max 5).
-        if side == "long" and t.signals.get("macd_bull"):
+        # MACD histogram positive (max 5).
+        if t.signals.get("macd_bull"):
             pts += 5
-        elif side == "short" and t.signals.get("macd_bear"):
-            pts += 5
-        # Stochastic position (max 4): room to move in our direction.
+        # Stochastic has room to run up (max 4).
         k = t.values.get("stoch_k")
-        if k is not None:
-            if side == "long" and k < 80:
-                pts += 4
-            elif side == "short" and k > 20:
-                pts += 4
+        if k is not None and k < 80:
+            pts += 4
         return round(min(pts, MAX_POINTS["momentum"]), 1)
 
     def _mtf(self, side, m: Optional[MTFResult], s) -> float:
@@ -150,53 +151,60 @@ class MasterScorer:
         # Scale by how many timeframes agree (out of up to 5).
         return round(min(m.confluence_score / 5 * MAX_POINTS["mtf"], MAX_POINTS["mtf"]), 1)
 
-    def _statistical(self, side, q: Optional[QuantResult], regime: Optional[Regime], s) -> float:
+    def _statistical(self, side, q: Optional[QuantResult], s) -> float:
+        """Pure-trend statistical edge (max 12). Mean-reversion / oversold-bounce
+        components removed — this strategy only rewards trend persistence."""
         if q is None:
             return MAX_POINTS["statistical"] * 0.5
         pts = 0.0
         v = q.values
-        is_mr = regime is not None and regime.strategy == "mean_reversion"
+        # Trending (persistent) series favoured — Hurst > 0.55 (max 5).
         hurst = v.get("hurst")
-        # Hurst aligned with strategy type (max 6).
         if hurst is not None:
-            if is_mr and hurst < 0.45:
-                pts += 6
-            elif not is_mr and hurst > 0.55:
-                pts += 6
-            elif 0.45 <= hurst <= 0.55:
-                pts += 2
-        # Z-score confirms (max 5): trend trade wants slope, MR wants extreme.
-        z = v.get("zscore_20")
-        if z is not None:
-            if is_mr:
-                if side == "long" and z < -1:
-                    pts += 5
-                elif side == "short" and z > 1:
-                    pts += 5
-            else:
-                slope = v.get("slope_pct") or 0
-                if (side == "long" and slope > 0) or (side == "short" and slope < 0):
-                    pts += 5
-        # Autocorrelation positive for trend continuation (max 4).
+            if hurst > 0.55:
+                pts += 5
+            elif hurst >= 0.45:
+                pts += 1
+        # Positive regression slope = uptrend (max 4).
+        slope = v.get("slope_pct") or 0
+        if slope > 0:
+            pts += 4
+        # Positive autocorrelation = trend continuation (max 3).
         ac = v.get("autocorr_lag1")
-        if ac is not None and not is_mr and ac > 0:
-            pts += 4
-        elif ac is not None and is_mr and ac < 0:
-            pts += 4
+        if ac is not None and ac > 0:
+            pts += 3
         return round(min(pts, MAX_POINTS["statistical"]), 1)
 
+    def _relative_strength(self, q: Optional[QuantResult], s) -> float:
+        """Relative strength vs SPY (max 10) + hard gate. A long must outperform
+        SPY on both the 20- and 60-bar horizons; if it doesn't, veto the trade.
+        Neutral (half marks, no veto) when SPY is unavailable (rs is None)."""
+        if q is None:
+            return MAX_POINTS["relative_strength"] * 0.5
+        rs20 = q.values.get("rel_strength_20")
+        rs60 = q.values.get("rel_strength_60")
+        outperf = q.values.get("rs_outperform")
+        if outperf is None:                       # no market series -> neutral
+            s.notes.append("rs: SPY unavailable -> neutral")
+            return MAX_POINTS["relative_strength"] * 0.5
+        if not outperf:                           # hard gate: must beat SPY
+            s.rs_veto = True
+            s.notes.append(f"vetoed: lagging SPY (rs20={rs20:+.3f}, rs60={rs60:+.3f})")
+            return 0.0
+        # Scale points by the strength of outperformance (cap at +10% excess).
+        pts = 5 + min(5.0, (max(rs20, 0) + max(rs60, 0)) / 0.10 * 5)
+        return round(min(pts, MAX_POINTS["relative_strength"]), 1)
+
     def _regime(self, side, r: Optional[Regime], s) -> float:
+        """Reward trend regimes only (max 8). Mean-reversion regimes no longer
+        earn points — this strategy only trades momentum."""
         if r is None:
             return MAX_POINTS["regime"] * 0.5
-        if r.strategy == "none":
-            return 0.0
         if r.trend == "strong_trend" and r.strategy == "momentum":
             return float(MAX_POINTS["regime"])
         if r.trend == "weak_trend" and r.strategy == "momentum":
-            return 10.0
-        if r.strategy == "mean_reversion":
-            return 11.0
-        return 6.0
+            return 4.0
+        return 0.0
 
     def _ml(self, side, ml: Optional[MLPrediction], s) -> float:
         if ml is None or not ml.trained:
