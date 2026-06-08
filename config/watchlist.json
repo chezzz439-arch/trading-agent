@@ -35,12 +35,9 @@
     "WMT",
     "ORCL",
     "MRVL",
-    "BRK.B",
-    "JPM",
     "PLTR",
     "CSCO",
     "ASML",
-    "V",
     "XOM",
     "ARM",
     "AMAT",
@@ -53,9 +50,6 @@
     "CAT",
     "NFLX",
     "IBM",
-    "BAC",
-    "MA",
-    "GS",
     "CVX",
     "PANW",
     "WDC",
@@ -72,14 +66,11 @@
     "CRM",
     "PG",
     "KO",
-    "MS",
     "ADI",
     "GLW",
-    "WFC",
     "LITE",
     "MRK",
     "ANET",
-    "C",
     "APH",
     "BA",
     "LIN",
@@ -91,7 +82,6 @@
     "TMO",
     "PEP",
     "NEE",
-    "AXP",
     "VRT",
     "UBER",
     "TJX",
@@ -100,8 +90,6 @@
     "ABT",
     "COHR",
     "TMUS",
-    "HOOD",
-    "SCHW",
     "AMGN",
     "ISRG",
     "BKNG",
@@ -120,7 +108,6 @@
     "HPE",
     "SPOT",
     "WELL",
-    "SPGI",
     "DHR",
     "ACN",
     "NET",
@@ -132,7 +119,6 @@
     "MELI",
     "CEG",
     "FTNT",
-    "COF",
     "MCK",
     "CDNS",
     "MSTR",
@@ -140,7 +126,6 @@
     "PWR",
     "CIEN",
     "SNPS",
-    "CME",
     "BSX",
     "NEM",
     "TER",
@@ -151,7 +136,6 @@
     "ROST",
     "RCL",
     "ON",
-    "COIN",
     "NKE",
     "FLEX",
     "DASH",
@@ -165,7 +149,6 @@
     "CRCL",
     "SATS",
     "FSLR",
-    "SOFI",
     "AKAM",
     "ZS",
     "BTC/USD",
@@ -346,24 +329,6 @@
       "market_cap": 230681995559.1005,
       "avg_volume": 44937200
     },
-    "BRK.B": {
-      "name": "Berkshire Hathaway",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 488.13,
-      "market_cap": 1052825054461.1227,
-      "avg_volume": 5114645
-    },
-    "JPM": {
-      "name": "JPMorgan Chase",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 312.37,
-      "market_cap": 836998968557.1082,
-      "avg_volume": 8847905
-    },
     "PLTR": {
       "name": "Palantir Technologies",
       "sector": "Technology",
@@ -390,15 +355,6 @@
       "price": 1641.74,
       "market_cap": 632755593573.2556,
       "avg_volume": 1673940
-    },
-    "V": {
-      "name": "Visa Inc.",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 323.57,
-      "market_cap": 615347255294.7876,
-      "avg_volume": 8166190
     },
     "XOM": {
       "name": "ExxonMobil",
@@ -507,33 +463,6 @@
       "price": 284.84,
       "market_cap": 267716919713.2373,
       "avg_volume": 12278210
-    },
-    "BAC": {
-      "name": "Bank of America",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 53.83,
-      "market_cap": 382009487737.57556,
-      "avg_volume": 39682995
-    },
-    "MA": {
-      "name": "Mastercard",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 491.08,
-      "market_cap": 433910347648.8707,
-      "avg_volume": 3689315
-    },
-    "GS": {
-      "name": "Goldman Sachs",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 1038.68,
-      "market_cap": 306418323889.40515,
-      "avg_volume": 2224855
     },
     "CVX": {
       "name": "Chevron Corporation",
@@ -679,15 +608,6 @@
       "market_cap": 341961317025.7878,
       "avg_volume": 15623035
     },
-    "MS": {
-      "name": "Morgan Stanley",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 211.93,
-      "market_cap": 334273959714.43097,
-      "avg_volume": 5853185
-    },
     "ADI": {
       "name": "Analog Devices",
       "sector": "Technology",
@@ -705,15 +625,6 @@
       "price": 177.58,
       "market_cap": 152832066539.37494,
       "avg_volume": 14562980
-    },
-    "WFC": {
-      "name": "Wells Fargo",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 81.94,
-      "market_cap": 250751934609.52576,
-      "avg_volume": 17846835
     },
     "LITE": {
       "name": "Lumentum",
@@ -741,15 +652,6 @@
       "price": 154.27,
       "market_cap": 194252074580.01224,
       "avg_volume": 11476765
-    },
-    "C": {
-      "name": "Citigroup",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 132.47,
-      "market_cap": 225937781310.85312,
-      "avg_volume": 10500790
     },
     "APH": {
       "name": "Amphenol",
@@ -850,15 +752,6 @@
       "market_cap": 179028356293.00507,
       "avg_volume": 13438520
     },
-    "AXP": {
-      "name": "American Express",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 310.66,
-      "market_cap": 211971535281.13406,
-      "avg_volume": 3132990
-    },
     "VRT": {
       "name": "Vertiv",
       "sector": "Industrials",
@@ -930,24 +823,6 @@
       "price": 178.1,
       "market_cap": 192740666702.9534,
       "avg_volume": 4788340
-    },
-    "HOOD": {
-      "name": "Robinhood Markets",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 82.47,
-      "market_cap": 74264653150.03934,
-      "avg_volume": 26694870
-    },
-    "SCHW": {
-      "name": "Charles Schwab Corporation",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 88.84,
-      "market_cap": 154504792072.97556,
-      "avg_volume": 11849625
     },
     "AMGN": {
       "name": "Amgen",
@@ -1111,15 +986,6 @@
       "market_cap": 146074871968.22815,
       "avg_volume": 3876850
     },
-    "SPGI": {
-      "name": "S&P Global",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 424.44,
-      "market_cap": 125634240722.65625,
-      "avg_volume": 2194630
-    },
     "DHR": {
       "name": "Danaher Corporation",
       "sector": "Healthcare",
@@ -1219,15 +1085,6 @@
       "market_cap": 105999563843.80292,
       "avg_volume": 6460445
     },
-    "COF": {
-      "name": "Capital One",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 180.67,
-      "market_cap": 112429635965.15788,
-      "avg_volume": 4812620
-    },
     "MCK": {
       "name": "McKesson Corporation",
       "sector": "Healthcare",
@@ -1290,15 +1147,6 @@
       "price": 464.85,
       "market_cap": 89009165394.94705,
       "avg_volume": 1988035
-    },
-    "CME": {
-      "name": "CME Group",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 257.4,
-      "market_cap": 93004473902.06094,
-      "avg_volume": 3354920
     },
     "BSX": {
       "name": "Boston Scientific",
@@ -1389,15 +1237,6 @@
       "price": 117.26,
       "market_cap": 45591063007.23322,
       "avg_volume": 11777250
-    },
-    "COIN": {
-      "name": "Coinbase",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 152.4,
-      "market_cap": 40151419130.3631,
-      "avg_volume": 10092130
     },
     "NKE": {
       "name": "Nike, Inc.",
@@ -1515,15 +1354,6 @@
       "price": 279.01,
       "market_cap": 29980563859.979248,
       "avg_volume": 3088110
-    },
-    "SOFI": {
-      "name": "SoFi",
-      "sector": "Financials",
-      "asset_class": "stock",
-      "tradable": true,
-      "price": 16.03,
-      "market_cap": 20562342316.788483,
-      "avg_volume": 70441210
     },
     "AKAM": {
       "name": "Akamai Technologies",

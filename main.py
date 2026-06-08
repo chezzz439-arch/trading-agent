@@ -309,7 +309,10 @@ class TradingAgent:
         for sym in self.watchlist:
             held = sym in open_symbols or sym.replace("/", "") in open_symbols
             sc = self._pre_scores.get(sym)
-            if held or sc is None or sc >= 21:
+            # Crypto trades 24/7 and is the only thing live when equities are
+            # closed, so it's always tier-1 (never demoted to the every-Nth-cycle
+            # tiers even when short-biased and scoring 0).
+            if held or sc is None or sc >= 21 or is_crypto(sym):
                 scan_set.append(sym)                      # Tier 1 / always
             elif sc >= 14 and cyc % 2 == 0:
                 scan_set.append(sym)                      # Tier 2: every 2nd
@@ -334,6 +337,15 @@ class TradingAgent:
         logger.info("Pre-ranked %d candidates from %d/%d scanned this cycle (tiered); "
                     "deep-analyzing top %d", len(candidates), len(scan_set),
                     len(self.watchlist), len(top))
+        # Crypto visibility: it's scanned 24/7 but only enters on a long bias
+        # (Alpaca can't short crypto). Surface how many were scanned vs long-
+        # eligible so a quiet crypto book is explainable, not invisible.
+        crypto_scanned = [s for s in scan_set if is_crypto(s)]
+        crypto_long = [c["symbol"] for c in candidates if is_crypto(c["symbol"])]
+        if crypto_scanned:
+            logger.info("Crypto: %d scanned, %d long-eligible%s", len(crypto_scanned),
+                        len(crypto_long), (" (" + ", ".join(crypto_long) + ")") if crypto_long
+                        else " (all short-biased — no longs)")
 
         # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
         scores_for_dash = []

@@ -36,6 +36,12 @@ MIN_HISTORY_DAYS = 240          # ~1 trading year
 TOP_N_STOCKS = 150
 WATCHLIST_PATH = settings.WATCHLIST_PATH
 
+# GICS sectors to exclude from the equity universe. Financials (banks, insurers,
+# capital-markets, payment networks) behave on rate/credit cycles the technical+
+# momentum stack doesn't model, so they're screened out entirely. Compared after
+# _SECTOR_FIX normalization and case-insensitively.
+EXCLUDE_SECTORS = {"financials"}
+
 _SOURCES = [
     ("S&P 500", "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", 0, "Symbol", "Security", "GICS Sector"),
     ("S&P 400", "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", 0, "Symbol", "Security", "GICS Sector"),
@@ -103,10 +109,14 @@ def screen_stocks(uni: dict[str, dict]) -> tuple[list[dict], dict]:
     """Two-pass screen. Returns (top_qualified_rows, funnel_counts)."""
     import yfinance as yf
 
+    raw = len(uni)
+    uni = {s: m for s, m in uni.items()
+           if (m.get("sector") or "").strip().lower() not in EXCLUDE_SECTORS}
+    excluded = raw - len(uni)
     symbols = list(uni.keys())
     yf_of = {s: s.replace(".", "-") for s in symbols}
-    funnel = {"universe": len(symbols), "have_data": 0, "price_ok": 0,
-              "volume_ok": 0, "history_ok": 0, "mcap_ok": 0}
+    funnel = {"universe": raw, "sector_excluded": excluded, "have_data": 0,
+              "price_ok": 0, "volume_ok": 0, "history_ok": 0, "mcap_ok": 0}
 
     # Pass 1: chunked batch download of 1y daily bars -> price/volume/history.
     candidates = []
