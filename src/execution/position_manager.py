@@ -64,7 +64,8 @@ class ManagedPosition:
     regime: str = ""           # regime label at entry
     fractional: bool = False
     entry_time: str = ""
-    bars_held: int = 0
+    bars_held: int = 0         # number of *daily* bars held (not scan cycles)
+    last_bar_date: str = ""    # date of the last counted daily bar; gates time-exit
     tranches_taken: list = field(default_factory=list)
     breakeven_done: bool = False
     trailing_active: bool = False

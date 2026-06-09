@@ -104,6 +104,24 @@ def test_time_exit_when_stalled():
     assert mp.status == "closed"
 
 
+def test_scan_cycles_do_not_count_as_bars():
+    """Intra-day scan cycles (advance_bar=False) must NOT age the time-exit
+    clock — only real daily bars do. Guards the unit mismatch that force-closed
+    positions ~40 min after entry instead of after time_exit_bars *days*."""
+    mp = make_pos()
+    pm = PositionManager(time_exit_bars=10, time_exit_min_r=1.0)
+    for _ in range(200):                     # 200 cycles in a day, stalled at +0.5R
+        acts = pm.update(mp, price=101.0, atr=2.0, advance_bar=False)
+        assert ("time_exit", "time") not in kinds(acts)
+    assert mp.bars_held == 0 and mp.status == "open"
+    # Now advance 10 genuine daily bars -> time-exit fires.
+    last = []
+    for _ in range(10):
+        last = pm.update(mp, price=101.0, atr=2.0, advance_bar=True)
+    assert mp.bars_held == 10
+    assert ("time_exit", "time") in kinds(last) and mp.status == "closed"
+
+
 def test_initial_stop_hit_is_a_loss():
     mp = make_pos()
     pm = PositionManager()

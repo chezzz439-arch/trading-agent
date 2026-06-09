@@ -635,11 +635,34 @@ class TradingAgent:
                 price = float(getattr(pos, "current_price", mp.entry) or mp.entry)
             except (TypeError, ValueError):
                 price = mp.entry
-            for action in self.position_manager.update(mp, price, atr=mp.atr):
+            # Time-exit counts *daily* bars, not 4-min scan cycles. Advance
+            # bars_held at most once per new daily bar so TIME_EXIT_BARS means
+            # trading days, not minutes (see PositionManager.time_exit_bars).
+            bar_date = self._latest_bar_date(mp.symbol)
+            new_bar = bool(mp.last_bar_date) and bar_date != mp.last_bar_date
+            for action in self.position_manager.update(mp, price, atr=mp.atr,
+                                                       advance_bar=new_bar):
                 self._execute_action(mp, action, price)
+            mp.last_bar_date = bar_date
             if mp.status == "closed":
                 self._finalize_close(mp, equity)
         self.position_store.save(self.managed)
+
+    def _latest_bar_date(self, sym: str) -> str:
+        """Date of the most recent completed daily bar for ``sym``.
+
+        This is the true "new bar" signal for the time-exit clock: it skips
+        weekends/holidays naturally (no new daily bar forms). Falls back to the
+        current US/Eastern date if the feed is unavailable, so the clock never
+        stalls — at worst it advances on a calendar day instead of a bar.
+        """
+        try:
+            df = self.feed.get_bars(sym, "1Day", 3)
+            if df is not None and not df.empty:
+                return str(df.index[-1].date())
+        except Exception:
+            pass
+        return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
     def _execute_action(self, mp, a, price) -> None:
         """Carry out a manager action against the broker.
