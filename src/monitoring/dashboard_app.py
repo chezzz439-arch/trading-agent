@@ -1,9 +1,9 @@
 """Beginner-friendly trading dashboard — "Cash App meets Robinhood".
 
 Five plain-English pages (Your Money / Trades / Watching / Performance / Bot)
-with big friendly numbers, green=up/red=down, emojis, and a glossary. Reads the
-agent's live state + Alpaca account; falls back to clearly-labelled sample data
-so every page looks full before the bot has traded.
+with big friendly numbers, green=up/red=down, emojis, and a glossary. Shows the
+agent's live state + Alpaca account ONLY — no demo/sample data. When the agent
+isn't running it shows a clean "Agent offline" screen.
 
 Run:  streamlit run src/monitoring/dashboard_app.py  ->  http://localhost:8501
 """
@@ -25,7 +25,6 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from config import settings
-from src.monitoring.sample_data import build_sample
 from src.monitoring.state_store import StateStore
 
 st.set_page_config(page_title="My Trading Bot", layout="wide", page_icon="💰",
@@ -87,7 +86,7 @@ def dot(good: bool) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Data — live state mapped into the sample shape, or the sample itself
+# Data — the agent's live state mapped into the dashboard's display shape
 # --------------------------------------------------------------------------- #
 _EMOJI = {"AAPL": "🍎", "NVDA": "🎮", "TSLA": "⚡", "MSFT": "🪟", "AMZN": "🛒",
           "GOOGL": "🔍", "META": "👥", "AMD": "💻", "NFLX": "📺", "JPM": "🏦",
@@ -185,11 +184,14 @@ def build_live(state: dict) -> dict:
 
 
 def load_data():
-    state = get_store().read_state()
-    has_real = bool(state.get("open_positions") or state.get("closed_today"))
-    default = "Live" if has_real else "Demo"
-    mode = st.session_state.get("data_mode", default)
-    return (build_sample() if mode == "Demo" else build_live(state)), mode, default
+    """Live data only. Returns (data, online). ``online`` is False when the agent
+    hasn't written fresh state recently — the dashboard then shows a clean
+    'Agent offline' screen instead of any demo/sample data (there is none)."""
+    store = get_store()
+    # Generous freshness window: the agent writes state once per scan, so allow a
+    # few scan intervals before declaring it offline.
+    online = store.is_fresh(max_age_seconds=max(600, settings.SCAN_INTERVAL * 3))
+    return build_live(store.read_state()), online
 
 
 # --------------------------------------------------------------------------- #
@@ -206,12 +208,12 @@ GLOSSARY = {
 }
 
 
-def top_bar(d: dict, mode: str):
+def top_bar(d: dict):
     up = d["daily_pnl"] >= 0
     st.markdown(
         f"<div class='row'>"
         f"<div><span class='pill'>🤖 Bot {dot(d['bot']['running'])}</span>"
-        f"<span class='pill'>{'🧪 Sample data' if mode=='Demo' else '🔴 Live data'}</span></div>"
+        f"<span class='pill'>🔴 Live data</span></div>"
         f"<div style='text-align:right'><span style='font-weight:800;font-size:18px'>{money(d['equity'])}</span> "
         f"<span style='color:{col_for(d['daily_pnl'])};font-weight:700'>"
         f"{'▲' if up else '▼'} {signed(d['daily_pnl'])} today</span></div></div>",
@@ -235,8 +237,13 @@ def page_home(d):
     st.markdown(
         f"<div class='hero'><div class='label'>Your Portfolio</div>"
         f"<div class='big'>{money(d['equity'])}</div>"
-        f"<div style='font-size:17px;font-weight:700;color:{'#00E676' if up else '#FF6E6E'}'>"
-        f"{'▲' if up else '▼'} {signed(d['daily_pnl'])} today ({d['daily_pct']:+.2f}%) {dot(up)}</div></div>",
+        f"<div style='display:inline-block;margin-top:10px;padding:10px 20px;border-radius:16px;"
+        f"background:{'rgba(0,200,83,.14)' if up else 'rgba(255,82,82,.14)'}'>"
+        f"<span style='font-size:13px;font-weight:700;letter-spacing:.5px;color:#7a8699'>TODAY {dot(up)}</span><br>"
+        f"<span style='font-size:34px;font-weight:800;color:{'#00C853' if up else '#FF5252'}'>"
+        f"{'▲' if up else '▼'} {signed(d['daily_pnl'])}</span> "
+        f"<span style='font-size:18px;font-weight:700;color:{'#00C853' if up else '#FF5252'}'>({d['daily_pct']:+.2f}%)</span>"
+        f"</div></div>",
         unsafe_allow_html=True)
 
     # Equity chart with timeframe selector
@@ -258,7 +265,8 @@ def page_home(d):
     # Four mini cards
     c1, c2, c3, c4 = st.columns(4)
     _mini(c1, "💵 Started", money(d["started"], cents=False), "your deposit")
-    _mini(c2, "📈 Now Worth", money(d["equity"], cents=False), "right now")
+    _mini(c2, "📅 Today", f"{signed(d['daily_pnl'])}", f"{d['daily_pct']:+.2f}% today",
+          color=col_for(d["daily_pnl"]))
     _mini(c3, "🎯 All Time", f"{signed(d['all_time_pnl'])}", f"{d['all_time_pct']:+.2f}% profit/loss",
           color=col_for(d["all_time_pnl"]))
     _mini(c4, "🏆 Win Rate", f"{d['win_rate']*100:.0f}%", "of trades are winners")
@@ -665,22 +673,30 @@ def _nav():
 
 def main():
     try:
-        d, mode, default = load_data()
+        d, online = load_data()
     except Exception:
         st.error("😅 Couldn't load your data right now. Try the Refresh button in a moment.")
         return
 
-    top_bar(d, mode)
+    # Live data only — no demo/sample fallback. If the agent isn't running (no
+    # fresh state written), show a clean offline screen instead of stale/fake data.
+    if not online:
+        st.title("💤 Agent offline")
+        st.markdown(
+            "The trading agent isn't running or hasn't reported in recently, so "
+            "there's no live data to show. Start it with `python main.py` (or "
+            "`./start.sh`) and this dashboard will update automatically.")
+        st_autorefresh(interval=30_000, key="offline_tick")
+        if st.button("🔄 Check again"):
+            st.rerun()
+        return
+
+    top_bar(d)
     page = st.session_state.get("force_page") or _nav() or list(PAGES.keys())[0]
 
-    # Controls row: refresh + data mode toggle + auto-refresh.
-    cc1, cc2, cc3, cc4 = st.columns([1, 1, 1.4, 2.6])
+    # Controls row: refresh + auto-refresh.
+    cc1, cc3, cc4 = st.columns([1, 1.4, 3.6])
     if cc1.button("🔄 Refresh"):
-        st.rerun()
-    new_mode = cc2.selectbox("Data", ["Demo", "Live"],
-                             index=0 if mode == "Demo" else 1, label_visibility="collapsed")
-    if new_mode != mode:
-        st.session_state["data_mode"] = new_mode
         st.rerun()
     # Auto-refresh: re-reads the agent's state file on a timer (default on, 30s).
     auto = cc3.toggle("Auto-refresh", value=st.session_state.get("auto_refresh", True),
