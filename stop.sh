@@ -25,7 +25,9 @@ if [ -f .agent.pid ] && kill -0 "$(cat .agent.pid)" 2>/dev/null; then
   kill -TERM "$(cat .agent.pid)" && ok "sent SIGTERM to agent PID $(cat .agent.pid)"
   rm -f .agent.pid
 else
-  pkill -TERM -f "python main.py" && ok "sent SIGTERM to main.py" || echo "${YEL}• no running agent found${NC}"
+  # -i: the interpreter resolves to ".../Python main.py" (capital P) on macOS,
+  # so a case-sensitive match silently misses the running agent.
+  pkill -i -TERM -f "python main.py" && ok "sent SIGTERM to main.py" || echo "${YEL}• no running agent found${NC}"
 fi
 
 # Stop the Streamlit dashboard the agent spawned.
