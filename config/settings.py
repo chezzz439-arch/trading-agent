@@ -69,6 +69,11 @@ MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
 MAX_CORRELATION: float = 0.70       # block new position too correlated to held
 PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
 
+# Long-term "core holdings" the bot must NEVER touch — buy-and-hold positions
+# the user manages by hand. The agent won't adopt, manage, time-exit, trade, or
+# count them toward its heat/loss accounting. (Separate from the active book.)
+CORE_HOLDINGS: set[str] = {"NVDA", "MSFT", "GOOGL", "AMZN", "MU", "LLY", "SPCX"}
+
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #

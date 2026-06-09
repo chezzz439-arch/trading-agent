@@ -432,6 +432,8 @@ class TradingAgent:
         is what the position cap is checked against, and a new entry is added to
         it so later candidates in the same scan see the higher count."""
         symbol, df, tech, side = c["symbol"], c["df"], c["tech"], c["side"]
+        if symbol in settings.CORE_HOLDINGS:
+            return None   # long-term hold — the bot never trades core holdings
 
         # ---- Phases 2-6 ------------------------------------------------- #
         quant = self.quant.analyze(df, market_df=spy_df if not spy_df.empty else None)
@@ -602,6 +604,8 @@ class TradingAgent:
         adopted = []
         for p in positions:
             sym = p.symbol
+            if sym in settings.CORE_HOLDINGS:
+                continue   # long-term hold — never adopt/manage/time-exit it
             if sym in self.managed or sym.replace("/", "") in self.managed:
                 continue
             side = "long" if "LONG" in str(getattr(p, "side", "")).upper() else "short"
@@ -892,6 +896,8 @@ class TradingAgent:
         stops = self.broker.stop_prices()
         for p in positions:
             sym = p.symbol
+            if sym in settings.CORE_HOLDINGS:
+                continue   # core hold — excluded from the bot's heat budget
             if sym in tracked or sym.replace("/", "") in tracked:
                 continue   # already counted with its exact risk
             try:
@@ -1028,8 +1034,8 @@ class TradingAgent:
             except (TypeError, ValueError):
                 current[p.symbol] = 0.0
         for sym in set(self._pos_pnl) - set(current):
-            if sym in self.managed or sym in self._closed_by_manager:
-                continue   # exact close already booked by the position manager
+            if sym in self.managed or sym in self._closed_by_manager or sym in settings.CORE_HOLDINGS:
+                continue   # core holds + manager-booked closes aren't bot trades
             pnl = self._pos_pnl.get(sym, 0.0)
             risk = self._open_risk.get(sym) or abs(pnl) or 1.0
             rr = pnl / risk if risk else 0.0
