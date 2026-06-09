@@ -147,6 +147,7 @@ class TradingAgent:
         self._pre_scores: dict[str, float] = {}  # last pre-rank score per symbol (tiering)
         self._streamlit_proc = None
         self._scan_count = 0
+        self._market_open = True   # set each cycle from the Alpaca clock; gates live equity entries
 
     @staticmethod
     def _validate_credentials() -> None:
@@ -357,6 +358,21 @@ class TradingAgent:
                         len(crypto_long), (" (" + ", ".join(crypto_long) + ")") if crypto_long
                         else " (all short-biased — no longs)")
 
+        # --- Live-trading gate: only place real equity entries during the
+        # regular session (Alpaca clock is authoritative — handles holidays and
+        # half-days). Crypto trades 24/7 and is exempt. Outside hours we still
+        # score for the dashboard but don't queue blind market-on-open fills.
+        clock = self.broker.market_clock()
+        if clock is None:
+            self._market_open = False   # fail-closed: can't confirm open -> no live entries
+            logger.warning("Market clock unavailable — holding equity entries this cycle")
+        else:
+            self._market_open = bool(clock.is_open)
+            if not self._market_open:
+                pt = clock.next_open.astimezone(ZoneInfo("America/Los_Angeles"))
+                logger.info("Market CLOSED — equities scored only; next open %s PT",
+                            pt.strftime("%a %b %d %-I:%M %p"))
+
         # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
         scores_for_dash = []
         for c in top:
@@ -451,6 +467,13 @@ class TradingAgent:
         ok, why = research.allows(side)
         if not ok:
             logger.info("%s: blocked by research: %s", symbol, why)
+            return dash_row
+
+        # ---- Live-trading gate: equities only during the regular session --- #
+        # Crypto trades 24/7 (exempt). Outside hours the candidate is still
+        # scored above (dashboard) but no entry order is placed, so the agent
+        # trades live during market hours instead of queuing blind opens.
+        if not self._market_open and not is_crypto(symbol):
             return dash_row
 
         # ---- Options routing (opt-in): strong signal -> long call/put --- #

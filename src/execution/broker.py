@@ -78,6 +78,19 @@ class Broker:
             logger.exception("Failed to fetch positions")
             return []
 
+    def market_clock(self) -> Any | None:
+        """Alpaca market clock (``is_open`` / ``next_open`` / ``next_close``).
+
+        Authoritative source of regular-session hours — handles holidays and
+        early closes automatically. Returns ``None`` on API error so callers can
+        decide how to fail.
+        """
+        try:
+            return self._client.get_clock()
+        except Exception:
+            logger.warning("get_clock failed", exc_info=True)
+            return None
+
     def open_symbols(self) -> set[str]:
         return {p.symbol for p in self.get_positions()}
 
