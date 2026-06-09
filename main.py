@@ -143,6 +143,7 @@ class TradingAgent:
         self._open_risk: dict[str, float] = {}   # symbol -> intended dollar risk
         self._pos_pnl: dict[str, float] = {}     # last seen unrealized PnL per symbol
         self._closed_today: list[dict] = []
+        self._closed_by_manager: set[str] = set()  # symbols booked by P9 this cycle (anti-double-count)
         self._sent: dict[str, str] = {}          # summary-type -> date/week already sent
         self._pre_scores: dict[str, float] = {}  # last pre-rank score per symbol (tiering)
         self._streamlit_proc = None
@@ -289,6 +290,7 @@ class TradingAgent:
         positions = self.broker.get_positions()
         open_symbols = {p.symbol for p in positions}
         # P9: manage existing positions (scale-outs, dynamic stops, exits) first.
+        self._closed_by_manager = set()   # reset per cycle; populated by _finalize_close
         self._manage_positions(positions, equity)
         self._detect_closed_trades(positions, equity)
         # Options lifecycle (opt-in): re-price open options, take profit / stop /
@@ -735,6 +737,9 @@ class TradingAgent:
                                    "r_multiple": round(rr, 2)})
         self._open_risk.pop(mp.symbol, None)
         self.managed.pop(mp.symbol, None)
+        # Mark it booked so _detect_closed_trades (which runs after this pops the
+        # symbol out of self.managed) doesn't record the same close a second time.
+        self._closed_by_manager.add(mp.symbol)
 
     def _finalize_external_close(self, mp, equity) -> None:
         """A managed position vanished from the broker — its bracket leg filled.
@@ -1023,8 +1028,8 @@ class TradingAgent:
             except (TypeError, ValueError):
                 current[p.symbol] = 0.0
         for sym in set(self._pos_pnl) - set(current):
-            if sym in self.managed:
-                continue   # exact close handled by the position manager
+            if sym in self.managed or sym in self._closed_by_manager:
+                continue   # exact close already booked by the position manager
             pnl = self._pos_pnl.get(sym, 0.0)
             risk = self._open_risk.get(sym) or abs(pnl) or 1.0
             rr = pnl / risk if risk else 0.0
