@@ -97,11 +97,9 @@ def company_info(symbol: str) -> dict:
     """Name, blurb, sector, market cap, next earnings — cached 7 days."""
     if is_crypto(symbol):
         coin = symbol.split("/")[0]
-        names = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "DOGE": "Dogecoin",
-                 "XRP": "XRP", "ADA": "Cardano", "AVAX": "Avalanche", "LINK": "Chainlink",
-                 "LTC": "Litecoin", "UNI": "Uniswap", "AAVE": "Aave", "CRV": "Curve",
-                 "SUSHI": "SushiSwap", "DOT": "Polkadot", "FIL": "Filecoin", "ARB": "Arbitrum"}
-        return {"name": names.get(coin, coin), "blurb": f"{names.get(coin, coin)} — cryptocurrency, trades 24/7.",
+        name = COIN_NAMES.get(coin, coin)
+        return {"name": name,
+                "blurb": COIN_BLURBS.get(coin, f"{name} — cryptocurrency, trades 24/7."),
                 "sector": "Crypto", "industry": "Digital assets", "market_cap": None, "earnings_days": None}
     with _company_lock:
         cache = _read_json(COMPANY_CACHE, {})
@@ -519,8 +517,9 @@ def api_equity(range: str = "1M"):
     return portfolio_history(range.upper())
 
 
-@app.get("/api/positions")
-def api_positions():
+def position_rows() -> list[dict]:
+    """Managed positions enriched with live Alpaca prices, company info,
+    and captured reasoning — shared by the Positions and Crypto pages."""
     st = state()
     managed = {m["symbol"]: m for m in st.get("managed", [])}
     live = {p.symbol: p for p in alpaca_positions()}
@@ -551,7 +550,240 @@ def api_positions():
             "reasoning": {k: rec.get(k) for k in ("summary", "breakdown", "signals", "research", "rr")},
         })
     out.sort(key=lambda p: -(p["pnl"] or 0))
-    return {"positions": out, "options": st.get("options", [])}
+    return out
+
+
+@app.get("/api/positions")
+def api_positions():
+    return {"positions": position_rows(), "options": state().get("options", [])}
+
+
+# --------------------------------------------------------------------------- #
+# Options page
+# --------------------------------------------------------------------------- #
+def _pretty_date(iso: str) -> str:
+    try:
+        d = datetime.fromisoformat(str(iso)).date()
+    except ValueError:
+        return str(iso)
+    return d.strftime("%B ") + str(d.day)
+
+
+def _dte(iso: str) -> int | None:
+    try:
+        return (datetime.fromisoformat(str(iso)).date() - datetime.now().date()).days
+    except ValueError:
+        return None
+
+
+def portfolio_greeks(occ_symbols: list[str], contracts: dict[str, int]) -> dict | None:
+    """Best-effort total delta/theta/vega from Alpaca option snapshots."""
+    if not occ_symbols:
+        return None
+
+    def _fetch():
+        from alpaca.data.historical.option import OptionHistoricalDataClient
+        from alpaca.data.requests import OptionSnapshotRequest
+        client = OptionHistoricalDataClient(settings.ALPACA_API_KEY,
+                                            settings.ALPACA_SECRET_KEY)
+        snaps = client.get_option_snapshot(
+            OptionSnapshotRequest(symbol_or_symbols=occ_symbols))
+        tot = {"delta": 0.0, "theta": 0.0, "vega": 0.0}
+        n = 0
+        for occ, snap in snaps.items():
+            g = getattr(snap, "greeks", None)
+            if g is None or g.delta is None:
+                continue
+            mult = contracts.get(occ, 1) * 100
+            tot["delta"] += float(g.delta) * mult
+            tot["theta"] += float(g.theta or 0) * mult
+            tot["vega"] += float(g.vega or 0) * mult
+            n += 1
+        return {k: round(v, 2) for k, v in tot.items()} | {"contracts_priced": n} if n else None
+    try:
+        return cached("greeks:" + ",".join(sorted(occ_symbols)), 120, _fetch)
+    except Exception as e:
+        log.warning("portfolio_greeks: %s", e)
+        return None
+
+
+@app.get("/api/options_overview")
+def api_options_overview():
+    st = state()
+    gate = settings.OPTIONS_MIN_SCORE
+
+    positions = []
+    for o in st.get("options", []):
+        und = o.get("underlying") or o.get("symbol", "")[:6].rstrip("0123456789")
+        info = company_info(und)
+        dte = _dte(o.get("expiration"))
+        verb = "UP" if (o.get("type") or "call").lower() == "call" else "DOWN"
+        positions.append({
+            **o, "dte": dte,
+            "company": {k: info.get(k) for k in ("name", "blurb", "sector", "market_cap")},
+            "plain_english": f"Betting {info.get('name') or und} goes {verb} "
+                             f"by {_pretty_date(o.get('expiration'))}",
+        })
+
+    greeks = portfolio_greeks([o["symbol"] for o in st.get("options", []) if o.get("symbol")],
+                              {o["symbol"]: int(o.get("contracts") or 1)
+                               for o in st.get("options", []) if o.get("symbol")})
+
+    # Best setups the bot is seeing right now: strongest longs vs the 80 gate.
+    target_expiry = (datetime.now()
+                     + timedelta(days=(settings.OPTIONS_DTE_MIN + settings.OPTIONS_DTE_MAX) // 2))
+    setups = []
+    for r in sorted(st.get("scores", []), key=lambda x: -(x.get("score") or 0)):
+        if r.get("side") != "long" or is_crypto(r["symbol"]):
+            continue
+        info = company_info(r["symbol"])
+        sc = r.get("score") or 0
+        setups.append({
+            "symbol": r["symbol"], "name": info.get("name"), "score": sc,
+            "gate": gate, "ready": sc >= gate,
+            "gap": round(max(0.0, gate - sc), 1),
+            "plain_english": (f"Ready to fire — would buy an ATM call on {info.get('name') or r['symbol']} "
+                              f"expiring around {target_expiry.strftime('%B ')}{target_expiry.day}"
+                              if sc >= gate else
+                              f"Betting {info.get('name') or r['symbol']} goes UP — needs "
+                              f"{gate - sc:.0f} more points to trigger a call purchase"),
+            "research_points": r.get("research"),
+        })
+        if len(setups) >= 6:
+            break
+
+    return {
+        "positions": positions, "greeks": greeks, "setups": setups,
+        "config": {
+            "min_score": gate, "max_positions": settings.OPTIONS_MAX_POSITIONS,
+            "dte_min": settings.OPTIONS_DTE_MIN, "dte_max": settings.OPTIONS_DTE_MAX,
+            "risk_pct": settings.OPTIONS_RISK_PCT,
+            "profit_target_pct": settings.OPTIONS_PROFIT_TARGET * 100,
+            "stop_loss_pct": settings.OPTIONS_STOP_LOSS * 100,
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Crypto page — computed server-side (crypto pairs aren't in state.scores)
+# --------------------------------------------------------------------------- #
+COIN_NAMES = {
+    "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "Binance Coin",
+    "XRP": "XRP", "ADA": "Cardano", "AVAX": "Avalanche", "DOGE": "Dogecoin",
+    "MATIC": "Polygon", "DOT": "Polkadot", "LINK": "Chainlink", "UNI": "Uniswap",
+    "LTC": "Litecoin", "ATOM": "Cosmos", "FIL": "Filecoin", "NEAR": "NEAR Protocol",
+    "ARB": "Arbitrum", "OP": "Optimism", "APT": "Aptos", "INJ": "Injective",
+    "AAVE": "Aave", "CRV": "Curve", "SUSHI": "SushiSwap",
+}
+
+COIN_BLURBS = {
+    "BTC": "The original cryptocurrency and the market's benchmark asset.",
+    "ETH": "Smart-contract platform powering most of DeFi and NFTs.",
+    "SOL": "High-throughput layer-1 chain known for speed and low fees.",
+    "BNB": "Exchange token of Binance, used for fees and its BNB Chain.",
+    "XRP": "Payments-focused token built for fast cross-border settlement.",
+    "ADA": "Proof-of-stake layer-1 with a research-driven roadmap.",
+    "AVAX": "Layer-1 with subnets aimed at app-specific blockchains.",
+    "DOGE": "The original memecoin — high beta to retail sentiment.",
+    "MATIC": "Polygon — Ethereum scaling via sidechains and zk-rollups.",
+    "DOT": "Polkadot — interoperability hub connecting parachains.",
+    "LINK": "Chainlink — the dominant oracle network feeding data on-chain.",
+    "UNI": "Uniswap — largest decentralized exchange protocol.",
+    "LTC": "Litecoin — early Bitcoin fork used for cheap payments.",
+    "ATOM": "Cosmos — an ecosystem of interconnected app-chains.",
+    "FIL": "Filecoin — decentralized file-storage marketplace.",
+    "NEAR": "Sharded layer-1 focused on developer-friendly UX.",
+    "ARB": "Arbitrum — leading Ethereum layer-2 rollup.",
+    "OP": "Optimism — Ethereum layer-2 powering the Superchain.",
+    "APT": "Aptos — Move-language layer-1 from ex-Libra engineers.",
+    "INJ": "Injective — finance-focused chain for on-chain derivatives.",
+    "AAVE": "Aave — the largest decentralized lending protocol.",
+    "CRV": "Curve — stablecoin-optimized DEX behind much of DeFi yield.",
+    "SUSHI": "SushiSwap — community-run decentralized exchange.",
+}
+
+
+@app.get("/api/crypto")
+def api_crypto():
+    def _build():
+        pairs = [s for s in settings.load_watchlist() if is_crypto(s)]
+        try:
+            bars = _feed.get_bars_batch(pairs, "1Day", settings.LOOKBACK_BARS)
+        except Exception as e:
+            log.warning("crypto batch bars: %s", e)
+            bars = {}
+        btc_df = bars.get(settings.CRYPTO_RS_BENCHMARK)
+        spy_df = _feed.get_bars(settings.MARKET_PROXY, "1Day", settings.LOOKBACK_BARS)
+
+        coins, uptrend_n = [], 0
+        for sym in pairs:
+            coin = sym.split("/")[0]
+            base = {"symbol": sym, "coin": coin,
+                    "name": company_info(sym).get("name") or coin,
+                    "blurb": COIN_BLURBS.get(coin, f"{coin} — cryptocurrency, trades 24/7.")}
+            df = bars.get(sym)
+            if df is None or df.empty or len(df) < 60:
+                coins.append({**base, "has_data": False, "status": "no_data"})
+                continue
+            closes = df["close"].astype(float)
+            px = float(closes.iloc[-1])
+            chg24 = float(closes.iloc[-1] / closes.iloc[-2] - 1) * 100 if len(closes) > 1 else None
+            e21 = float(closes.ewm(span=21, adjust=False).mean().iloc[-1])
+            e50 = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
+            uptrend = px > e21 > e50
+
+            score, trend_bias, beats_btc, rs20 = None, None, None, None
+            try:
+                tech = _tech.analyze(df)
+                bench = (spy_df if sym == settings.CRYPTO_RS_BENCHMARK else btc_df)
+                q = _quant.analyze(df, market_df=bench if bench is not None and not bench.empty else None)
+                reg = _regime.detect(df)
+                s = _scorer.score(sym, "long", technical=tech, quant=q, regime=reg)
+                score = round(s.total, 1)
+                trend_bias = tech.trend_bias
+                if q:
+                    rs20 = q.values.get("rel_strength_20")
+                    rs60 = q.values.get("rel_strength_60")
+                    if rs20 is not None and rs60 is not None:
+                        beats_btc = bool(rs20 > 0 and rs60 > 0)
+            except Exception as e:
+                log.warning("crypto score %s: %s", sym, e)
+
+            if uptrend:
+                uptrend_n += 1
+                status = "uptrend"
+            elif trend_bias == "short":
+                status = "short_biased"
+            else:
+                status = "neutral"
+            coins.append({
+                **base, "has_data": True, "price": px, "chg24_pct": round(chg24, 2) if chg24 is not None else None,
+                "score": score, "gate": settings.MIN_SCORE_CRYPTO,
+                "status": status, "uptrend": uptrend, "trend_bias": trend_bias,
+                "beats_btc": beats_btc,
+                "rs20_pct": round(rs20 * 100, 1) if rs20 is not None else None,
+                "is_benchmark": sym == settings.CRYPTO_RS_BENCHMARK,
+            })
+
+        coins.sort(key=lambda c: (not c.get("uptrend", False), -(c.get("score") or -1)))
+        with_data = [c for c in coins if c.get("has_data")]
+        if uptrend_n == 0:
+            headline = (f"0 of {len(with_data)} coins in a confirmed uptrend — "
+                        "waiting for crypto to turn bullish before risking a dollar")
+        else:
+            headline = (f"{uptrend_n} of {len(with_data)} coins in a confirmed uptrend — "
+                        f"longs unlock at score {settings.MIN_SCORE_CRYPTO:.0f}+")
+        return {
+            "coins": coins, "uptrend_count": uptrend_n,
+            "with_data": len(with_data), "total": len(pairs),
+            "headline": headline,
+            "gate": settings.MIN_SCORE_CRYPTO,
+        }
+    # Cache only the expensive coin-scoring sweep; positions stay live so the
+    # Crypto tab never disagrees with the Positions tab on P/L.
+    payload = dict(cached("crypto_page", 180, _build))
+    payload["positions"] = [p for p in position_rows() if is_crypto(p["symbol"])]
+    return payload
 
 
 @app.get("/api/reasoning")

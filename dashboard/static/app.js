@@ -230,6 +230,172 @@ async function renderPositions() {
   page.innerHTML = html;
 }
 
+/* =================== OPTIONS =================== */
+async function renderOptionsPage() {
+  const page = $("#page-options");
+  let d;
+  try { d = await api("options_overview"); } catch { return showError(page); }
+  const pos = d.positions || [], setups = d.setups || [], cfg = d.config || {}, g = d.greeks;
+
+  let html = "";
+  // Portfolio Greeks summary (only when we actually have priced positions)
+  if (g) {
+    html += `<div class="stats" style="margin-top:0">
+      <div class="card stat"><div class="k">Portfolio delta <span class="tip" data-tip="How many dollars the option book gains if every underlying rises $1. Positive = bullish exposure.">?</span></div>
+        <div class="v ${cls(g.delta)}">${fmtNum(g.delta, 1)}</div></div>
+      <div class="card stat"><div class="k">Theta / day <span class="tip" data-tip="Time decay: how many dollars the book loses each day just from the calendar, all else equal.">?</span></div>
+        <div class="v ${cls(g.theta)}">${fmt$(g.theta)}</div></div>
+      <div class="card stat"><div class="k">Vega <span class="tip" data-tip="Sensitivity to volatility: dollars gained per 1-point rise in implied volatility.">?</span></div>
+        <div class="v">${fmtNum(g.vega, 1)}</div></div>
+    </div>`;
+  }
+
+  if (pos.length) {
+    html += `<h2 class="section">Open option positions</h2>`;
+    html += pos.map((o) => `
+      <div class="card poscard hoverable">
+        <div class="poshead">
+          <span class="sym">${esc(o.underlying)}</span>
+          <span class="badge">${esc((o.type || "call").toUpperCase())} $${fmtNum(o.strike, 0)}</span>
+          <span class="cname">${esc(o.company?.name || "")}</span>
+          <span class="pnl-big ${cls(o.pnl)}">${arrow(o.pnl)} ${fmt$(Math.abs(o.pnl ?? 0))} (${fmtPct(o.pnl_pct, 1)})</span>
+        </div>
+        <div class="summary-line">🎯 ${esc(o.plain_english)}${o.dte != null ? ` — ${o.dte} days left` : ""}</div>
+        <div class="blurb">${esc(o.company?.blurb || "")}</div>
+        <div class="posmeta">
+          <div class="m"><div class="k">Strike</div><div class="v">${fmt$(o.strike, 0)}</div></div>
+          <div class="m"><div class="k">Expires</div><div class="v">${esc(o.expiration)}</div></div>
+          <div class="m"><div class="k">Days left</div><div class="v">${o.dte ?? "—"}</div></div>
+          <div class="m"><div class="k">Contracts</div><div class="v">${o.contracts}</div></div>
+          <div class="m"><div class="k">Premium paid</div><div class="v">${fmt$(o.premium_paid)}</div></div>
+          <div class="m"><div class="k">Value now</div><div class="v">${fmt$(o.value, 0)}</div></div>
+          <div class="m"><div class="k">Target</div><div class="v up">${fmt$(o.target_premium)}</div></div>
+          <div class="m"><div class="k">Stop</div><div class="v down">${fmt$(o.stop_premium)}</div></div>
+        </div>
+        ${o.description ? `<details class="why"><summary>Why the bot bought this</summary>
+          <div class="whybody"><div class="summary-line">${esc(o.description)}</div>
+          ${o.score ? `<div class="wfoot" style="margin-top:8px"><span>signal score ${fmtNum(o.score, 0)}/100 (needs ${fmtNum(cfg.min_score, 0)}+)</span></div>` : ""}
+          </div></details>` : ""}
+      </div>`).join("");
+  } else {
+    html += `<div class="card empty"><div class="big">🎯</div>No options positions yet — the bot will buy calls when a stock scores ${fmtNum(cfg.min_score, 0)}+.<br>
+      <span style="font-size:12.5px">When it fires: ATM call, ${cfg.dte_min}–${cfg.dte_max} days out, max ${cfg.max_positions} at a time,
+      sell at +${fmtNum(cfg.profit_target_pct, 0)}% or cut at −${fmtNum(cfg.stop_loss_pct, 0)}% of premium.</span></div>`;
+  }
+
+  html += `<h2 class="section">Best setups the bot is seeing</h2>`;
+  if (setups.length) {
+    html += `<div class="watchgrid">` + setups.map((s) => {
+      const color = s.ready ? "var(--green)" : (s.score >= s.gate - 10 ? "var(--amber)" : "var(--text-faint)");
+      return `<div class="card hoverable">
+        <div class="whead"><span class="sym" style="font-size:16px">${esc(s.symbol)}</span>
+          <span class="wname">${esc(s.name || "")}</span>
+          <span class="pill ${s.ready ? "bullish" : "neutral"}">${s.ready ? "ready" : `${fmtNum(s.gap, 0)} pts away`}</span></div>
+        <div class="scorebar">
+          <div class="track"><div class="fill" style="width:${s.score}%;background:${color}"></div>
+            <div class="gate-mark" style="left:${s.gate}%"></div></div>
+          <div class="nums"><span>score ${fmtNum(s.score, 1)}</span><span>calls fire at ${fmtNum(s.gate, 0)}+</span></div>
+        </div>
+        <div class="wreasons"><span>${esc(s.plain_english)}</span></div>
+        ${s.research_points ? `<div class="wfoot"><span>research ${s.research_points > 0 ? "+" : ""}${s.research_points} pts</span></div>` : ""}
+      </div>`;
+    }).join("") + `</div>`;
+  } else {
+    html += `<div class="card empty">No long candidates being scored right now.</div>`;
+  }
+  page.innerHTML = html;
+}
+
+/* =================== CRYPTO =================== */
+async function renderCryptoPage() {
+  const page = $("#page-crypto");
+  let d;
+  try { d = await api("crypto"); } catch { return showError(page); }
+  const coins = d.coins || [], pos = d.positions || [];
+  const n = { up: d.uptrend_count, neutral: coins.filter((c) => c.status === "neutral").length,
+              short: coins.filter((c) => c.status === "short_biased").length };
+
+  let html = `
+    <div class="card hero" style="padding-bottom:18px">
+      <div class="label">Crypto desk — 24/7</div>
+      <div class="today" style="font-size:17px;margin-top:6px" >${esc(d.headline)}</div>
+      <div class="wfoot" style="margin-top:10px">
+        <span style="color:var(--green)">▲ ${n.up} uptrend</span>
+        <span style="color:var(--amber)">• ${n.neutral} neutral</span>
+        <span style="color:var(--red)">▼ ${n.short} short-biased</span>
+        <span>${d.total - d.with_data} no Alpaca data</span>
+        <span>longs need: score ${fmtNum(d.gate, 0)}+ · confirmed daily uptrend · outperform BTC</span>
+      </div>
+    </div>`;
+
+  if (pos.length) {
+    html += `<h2 class="section">Open crypto positions</h2>`;
+    html += pos.map((p) => {
+      const rsn = p.reasoning || {};
+      return `<div class="card poscard hoverable">
+        <div class="poshead">
+          <span class="sym">${esc(p.symbol)}</span>
+          <span class="cname">${esc(p.company?.name || "")}</span>
+          <span class="pnl-big ${cls(p.pnl)}">${arrow(p.pnl)} ${fmt$(Math.abs(p.pnl ?? 0))} (${fmtPct(p.pnl_pct)})</span>
+        </div>
+        <div class="posmeta" style="margin-top:10px">
+          <div class="m"><div class="k">Qty</div><div class="v">${fmtNum(p.qty, 4)}</div></div>
+          <div class="m"><div class="k">Entry</div><div class="v">${fmt$(p.entry)}</div></div>
+          <div class="m"><div class="k">Now</div><div class="v">${fmt$(p.current)}</div></div>
+          <div class="m"><div class="k">Target</div><div class="v up">${fmt$(p.target)}</div></div>
+          <div class="m"><div class="k">Stop</div><div class="v down">${fmt$(p.stop)}</div></div>
+          <div class="m"><div class="k">Score</div><div class="v">${fmtNum(p.score, 0)}</div></div>
+        </div>
+        ${rsn.summary ? `<details class="why"><summary>Why the bot opened this</summary><div class="whybody">
+          <div class="summary-line">${esc(rsn.summary)}</div>
+          <div class="score-row" style="margin-top:12px">${scoreRing(p.score, 65)}${breakdownBars(rsn.breakdown)}</div>
+          ${signalLines(rsn.signals)}
+        </div></details>` : ""}
+      </div>`;
+    }).join("");
+  }
+
+  const statusPill = { uptrend: ["bullish", "uptrend ✓"], neutral: ["neutral", "neutral"],
+                       short_biased: ["avoid", "short-biased"], no_data: ["avoid", "no data"] };
+  html += `<h2 class="section">All ${d.total} watched pairs</h2><div class="watchgrid">`;
+  html += coins.map((c) => {
+    const [pillCls, pillTxt] = statusPill[c.status] || ["avoid", c.status];
+    if (!c.has_data) {
+      return `<div class="card" style="opacity:.55">
+        <div class="whead"><span class="sym" style="font-size:16px">${esc(c.coin)}</span>
+          <span class="wname">${esc(c.name)}</span><span class="pill avoid">no data</span></div>
+        <div class="wreasons"><span>${esc(c.blurb)}</span><span>· Not available on Alpaca's crypto feed</span></div>
+      </div>`;
+    }
+    const sc = c.score || 0;
+    const color = sc >= c.gate ? "var(--green)" : sc >= c.gate - 10 ? "var(--amber)" : "var(--text-faint)";
+    const px = c.price >= 100 ? fmt$(c.price, 0) : c.price >= 1 ? fmt$(c.price) : fmt$(c.price, 4);
+    return `<div class="card wcard hoverable" data-sym="${esc(c.symbol)}">
+      <div class="whead"><span class="sym" style="font-size:16px">${esc(c.coin)}</span>
+        <span class="wname">${esc(c.name)}</span>
+        <span class="pill ${pillCls}">${pillTxt}</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-top:8px">
+        <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${px}</span>
+        <span class="${cls(c.chg24_pct)}" style="font-size:13px;font-weight:600">${fmtPct(c.chg24_pct)} 24h</span>
+      </div>
+      <div class="scorebar">
+        <div class="track"><div class="fill" style="width:${sc}%;background:${color}"></div>
+          <div class="gate-mark" style="left:${c.gate}%"></div></div>
+        <div class="nums"><span>score ${fmtNum(sc, 1)}</span><span>longs at ${fmtNum(c.gate, 0)}+</span></div>
+      </div>
+      <div class="wreasons">
+        ${c.is_benchmark ? `<span>★ The benchmark — every other coin is measured against it</span>`
+          : c.beats_btc == null ? ""
+          : `<span class="${c.beats_btc ? "up" : ""}">${c.beats_btc ? "✓ Outperforming Bitcoin" : "✗ Lagging Bitcoin"}${c.rs20_pct != null ? ` (${fmtPct(c.rs20_pct, 1)} over 20d)` : ""}</span>`}
+        <span>${c.uptrend ? "✓ Daily uptrend confirmed — eligible for a long" : "· Daily uptrend not confirmed — the bot stays out"}</span>
+        <span>${esc(c.blurb)}</span>
+      </div>
+    </div>`;
+  }).join("") + `</div>`;
+  page.innerHTML = html;
+  $$(".wcard", page).forEach((c) => c.onclick = () => openSymbolModal(c.dataset.sym));
+}
+
 /* =================== REASONING =================== */
 async function renderReasoning() {
   const page = $("#page-reasoning");
@@ -427,7 +593,7 @@ function showError(page) {
     <span style="font-size:12.5px">It retries automatically every ${REFRESH_MS / 1000}s.</span></div>`;
 }
 
-const RENDER = { overview: renderOverview, positions: renderPositions, reasoning: renderReasoning, watching: renderWatching, performance: renderPerformance };
+const RENDER = { overview: renderOverview, positions: renderPositions, options: renderOptionsPage, crypto: renderCryptoPage, reasoning: renderReasoning, watching: renderWatching, performance: renderPerformance };
 let current = "overview";
 
 function route() {
