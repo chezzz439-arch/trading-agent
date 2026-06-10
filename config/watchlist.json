@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-07T04:53:11.262607+00:00",
+  "generated_at": "2026-06-08T12:02:53.757849+00:00",
   "criteria": {
     "min_price": 15.0,
     "min_market_cap": 3000000000.0,
@@ -10,10 +10,11 @@
   },
   "funnel": {
     "universe": 1114,
-    "have_data": 1114,
-    "price_ok": 1057,
-    "volume_ok": 953,
-    "history_ok": 941,
+    "sector_excluded": 174,
+    "have_data": 940,
+    "price_ok": 891,
+    "volume_ok": 813,
+    "history_ok": 804,
     "mcap_ok": 150
   },
   "count": 173,
@@ -126,29 +127,46 @@
     "PWR",
     "CIEN",
     "SNPS",
+    "PH",
     "BSX",
     "NEM",
+    "SBUX",
+    "LOW",
     "TER",
     "MPWR",
     "FCX",
     "ASTS",
     "CMCSA",
+    "ELV",
     "ROST",
     "RCL",
     "ON",
+    "ADP",
     "NKE",
+    "SLB",
+    "VLO",
+    "HCA",
     "FLEX",
     "DASH",
+    "SHW",
     "REGN",
     "MCHP",
+    "AEP",
     "SMCI",
+    "TGT",
     "VST",
+    "D",
+    "CVNA",
     "RDDT",
     "MDB",
     "WDAY",
     "CRCL",
+    "CCL",
     "SATS",
     "FSLR",
+    "ZTS",
+    "NTAP",
+    "TWLO",
     "AKAM",
     "ZS",
     "BTC/USD",
@@ -1148,6 +1166,15 @@
       "market_cap": 89009165394.94705,
       "avg_volume": 1988035
     },
+    "PH": {
+      "name": "Parker Hannifin",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 882.34,
+      "market_cap": 111251067856.36908,
+      "avg_volume": 833720
+    },
     "BSX": {
       "name": "Boston Scientific",
       "sector": "Healthcare",
@@ -1165,6 +1192,24 @@
       "price": 99.71,
       "market_cap": 106445685121.06625,
       "avg_volume": 7423485
+    },
+    "SBUX": {
+      "name": "Starbucks",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 95.29,
+      "market_cap": 108602014043.42651,
+      "avg_volume": 7613340
+    },
+    "LOW": {
+      "name": "Lowe's",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 210.74,
+      "market_cap": 118225143081.66504,
+      "avg_volume": 3134800
     },
     "TER": {
       "name": "Teradyne",
@@ -1211,6 +1256,15 @@
       "market_cap": 85090483137.58237,
       "avg_volume": 32835150
     },
+    "ELV": {
+      "name": "Elevance Health",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 415.53,
+      "market_cap": 90237483496.3092,
+      "avg_volume": 1751920
+    },
     "ROST": {
       "name": "Ross Stores",
       "sector": "Consumer Discretionary",
@@ -1238,6 +1292,15 @@
       "market_cap": 45591063007.23322,
       "avg_volume": 11777250
     },
+    "ADP": {
+      "name": "Automatic Data Processing",
+      "sector": "Industrials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 231.95,
+      "market_cap": 92718365490.00778,
+      "avg_volume": 2871590
+    },
     "NKE": {
       "name": "Nike, Inc.",
       "sector": "Consumer Discretionary",
@@ -1246,6 +1309,33 @@
       "price": 42.98,
       "market_cap": 63648524000.44371,
       "avg_volume": 22340930
+    },
+    "SLB": {
+      "name": "Schlumberger",
+      "sector": "Energy",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 54.87,
+      "market_cap": 82033812262.17613,
+      "avg_volume": 12665825
+    },
+    "VLO": {
+      "name": "Valero Energy",
+      "sector": "Energy",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 255.82,
+      "market_cap": 75961346466.04065,
+      "avg_volume": 2869970
+    },
+    "HCA": {
+      "name": "HCA Healthcare",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 372.13,
+      "market_cap": 82553245857.20215,
+      "avg_volume": 1774790
     },
     "FLEX": {
       "name": "Flex Ltd.",
@@ -1265,6 +1355,15 @@
       "market_cap": 68320696939.308014,
       "avg_volume": 5004295
     },
+    "SHW": {
+      "name": "Sherwin-Williams",
+      "sector": "Materials",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 305.3,
+      "market_cap": 75297852080.61127,
+      "avg_volume": 2267990
+    },
     "REGN": {
       "name": "Regeneron Pharmaceuticals",
       "sector": "Healthcare",
@@ -1283,6 +1382,15 @@
       "market_cap": 47887281698.38638,
       "avg_volume": 11791420
     },
+    "AEP": {
+      "name": "American Electric Power",
+      "sector": "Utilities",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 129.14,
+      "market_cap": 70265723500.38464,
+      "avg_volume": 5221795
+    },
     "SMCI": {
       "name": "Supermicro",
       "sector": "Technology",
@@ -1292,6 +1400,15 @@
       "market_cap": 25043065223.40329,
       "avg_volume": 42555230
     },
+    "TGT": {
+      "name": "Target Corporation",
+      "sector": "Consumer Staples",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 122.57,
+      "market_cap": 55670204459.23187,
+      "avg_volume": 6027160
+    },
     "VST": {
       "name": "Vistra Corp.",
       "sector": "Utilities",
@@ -1300,6 +1417,24 @@
       "price": 148.76,
       "market_cap": 50159262087.481384,
       "avg_volume": 5497935
+    },
+    "D": {
+      "name": "Dominion Energy",
+      "sector": "Utilities",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 66.9,
+      "market_cap": 58839386521.62955,
+      "avg_volume": 9867320
+    },
+    "CVNA": {
+      "name": "Carvana",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 66.51,
+      "market_cap": 47640342016.50707,
+      "avg_volume": 10043660
     },
     "RDDT": {
       "name": "Reddit",
@@ -1337,6 +1472,15 @@
       "market_cap": 19955683384.962463,
       "avg_volume": 17541190
     },
+    "CCL": {
+      "name": "Carnival Corporation",
+      "sector": "Consumer Discretionary",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 27.41,
+      "market_cap": 37966675594.21448,
+      "avg_volume": 26592445
+    },
     "SATS": {
       "name": "EchoStar",
       "sector": "Communication Services",
@@ -1354,6 +1498,33 @@
       "price": 279.01,
       "market_cap": 29980563859.979248,
       "avg_volume": 3088110
+    },
+    "ZTS": {
+      "name": "Zoetis",
+      "sector": "Healthcare",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 79.44,
+      "market_cap": 33303482717.426147,
+      "avg_volume": 9222575
+    },
+    "NTAP": {
+      "name": "NetApp",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 167.04,
+      "market_cap": 33083999200.16913,
+      "avg_volume": 4333575
+    },
+    "TWLO": {
+      "name": "Twilio",
+      "sector": "Technology",
+      "asset_class": "stock",
+      "tradable": true,
+      "price": 225.99,
+      "market_cap": 34299375455.118713,
+      "avg_volume": 3041540
     },
     "AKAM": {
       "name": "Akamai Technologies",
