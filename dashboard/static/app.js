@@ -490,7 +490,7 @@ async function renderBot() {
   const page = $("#page-bot");
   let d;
   try { d = await api("bot"); } catch { return showError(page); }
-  const st = d.status || {}, k = d.kill || {};
+  const st = d.status || {}, k = d.kill || {}, rg = d.regime_gate || {};
 
   const meter = (usedFrac, pct, limitPct, pnl, label) => {
     const f = usedFrac == null ? 0 : usedFrac;
@@ -529,6 +529,21 @@ async function renderBot() {
       <div class="wfoot" style="margin-top:12px">
         <span>also halts after ${k.max_consecutive_losses} consecutive losing trades</span>
         <span>measured from the bot's day-start equity — the Overview hero shows change since prior market close</span></div>
+    </div>
+
+    <h2 class="section">Regime gate</h2>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="pill ${!rg.enabled ? "avoid" : rg.open ? "bullish" : "bearish"}" style="margin-left:0">
+          ${!rg.enabled ? "OFF" : rg.open ? "OPEN" : "CLOSED"}</span>
+        <b style="font-size:14px">${!rg.enabled ? "Disabled — entries allowed in any regime"
+          : rg.open ? "Taking entries" : "Risk-off — new longs paused"}</b>
+      </div>
+      <div class="wfoot" style="margin-top:10px">
+        <span>${esc(rg.reason || "—")}</span>
+        ${rg.spy != null ? `<span>SPY ${fmtNum(rg.spy, 2)} · 50 EMA ${fmtNum(rg.ema, 2)}</span>` : ""}
+        <span>blocks new longs only — open positions keep their stops &amp; targets</span>
+      </div>
     </div>
 
     <h2 class="section">Connections</h2>

@@ -1199,6 +1199,18 @@ def api_bot():
         {"k": "Walled-off core holdings", "v": core},
     ]
 
+    # --- regime gate (risk-off entry pause) ----------------------------------- #
+    rg = st.get("regime_gate") or {}
+    regime_gate = {
+        "enabled": bool(rg.get("enabled", getattr(settings, "REGIME_GATE_ENABLED", False))),
+        # OPEN = taking entries, CLOSED = risk-off / paused. A disabled gate is
+        # always OPEN regardless of where SPY sits.
+        "open": not bool(rg.get("closed", False)),
+        "reason": rg.get("reason", "not yet evaluated"),
+        "spy": rg.get("spy"),
+        "ema": rg.get("ema"),
+    }
+
     return {
         "status": {
             "online": online, "halted": bool(st.get("halted")),
@@ -1212,6 +1224,7 @@ def api_bot():
             "equity": equity,
         },
         "kill": kill,
+        "regime_gate": regime_gate,
         "connections": connections,
         "sources": st.get("source_status", {}),
         "strategies": strategies,

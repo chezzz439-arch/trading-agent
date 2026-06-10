@@ -12,3 +12,4 @@ venv/
 
 # runtime
 .agent.pid
+.dashboard.pid

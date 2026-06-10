@@ -150,6 +150,12 @@ class TradingAgent:
         self._streamlit_proc = None
         self._scan_count = 0
         self._market_open = True   # set each cycle from the Alpaca clock; gates live equity entries
+        # Regime gate: recomputed each cycle from SPY vs its 50-day EMA. ``closed``
+        # True => pause new long entries (risk-off). Default open so the very first
+        # cycle (before SPY is fetched) never blocks.
+        self._regime_gate: dict = {"enabled": settings.REGIME_GATE_ENABLED,
+                                   "closed": False, "spy": None, "ema": None,
+                                   "reason": "not yet evaluated"}
 
     @staticmethod
     def _validate_credentials() -> None:
@@ -376,6 +382,15 @@ class TradingAgent:
                 logger.info("Market CLOSED — equities scored only; next open %s PT",
                             pt.strftime("%a %b %d %-I:%M %p"))
 
+        # --- Regime gate: pause new longs when the market is risk-off ----- #
+        # Evaluated once per cycle (the SPY-vs-EMA50 condition is the same for
+        # every candidate). Closed => _full_evaluate vetoes all fresh long
+        # entries this cycle; open positions are untouched.
+        self._regime_gate = self._eval_regime_gate(spy_df)
+        if self._regime_gate["closed"]:
+            logger.info("Regime gate ACTIVE — SPY below 50 EMA (%s), pausing new entries",
+                        self._regime_gate["reason"])
+
         # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
         scores_for_dash = []
         for c in top:
@@ -425,6 +440,34 @@ class TradingAgent:
         pre_score = self.scorer.prerank_score(symbol, side, tech)
         return {"symbol": symbol, "df": df, "tech": tech, "side": side,
                 "pre_score": pre_score}
+
+    def _eval_regime_gate(self, spy_df) -> dict:
+        """Risk-off gate state for this cycle: is SPY below its 50-day EMA?
+
+        Returns ``{enabled, closed, spy, ema, reason}``. ``closed`` True means
+        new long entries should be paused. Fails OPEN (never blocks) when the
+        gate is disabled, SPY history is missing, or anything errors — the gate
+        only ever stops trades on a *confirmed* risk-off reading.
+        """
+        if not settings.REGIME_GATE_ENABLED:
+            return {"enabled": False, "closed": False, "spy": None, "ema": None,
+                    "reason": "gate disabled"}
+        try:
+            if spy_df is None or spy_df.empty or len(spy_df) < 50:
+                return {"enabled": True, "closed": False, "spy": None, "ema": None,
+                        "reason": "insufficient SPY history — gate open"}
+            sc = spy_df["close"]
+            spy = float(sc.iloc[-1])
+            ema = float(sc.ewm(span=50, adjust=False).mean().iloc[-1])
+            closed = spy < ema
+            reason = (f"SPY {spy:.2f} < 50 EMA {ema:.2f}" if closed
+                      else f"SPY {spy:.2f} ≥ 50 EMA {ema:.2f}")
+            return {"enabled": True, "closed": closed, "spy": spy, "ema": ema,
+                    "reason": reason}
+        except Exception:
+            logger.exception("Regime gate evaluation failed — leaving gate open")
+            return {"enabled": True, "closed": False, "spy": None, "ema": None,
+                    "reason": "evaluation error — gate open"}
 
     def _full_evaluate(self, c, equity, committed, held_closes, sentiment, spy_df,
                        btc_df=None):
@@ -504,6 +547,15 @@ class TradingAgent:
                             f"{e21:.2f}" if e21 else "n/a",
                             f"{e50:.2f}" if e50 else "n/a")
                 return dash_row
+
+        # ---- Regime gate: pause new longs in a risk-off tape ------------- #
+        # When SPY is below its 50-day EMA the gate is closed and no fresh long
+        # is opened (equity or option). The symbol is still scored above for the
+        # dashboard; existing positions are managed elsewhere and untouched.
+        if side == "long" and self._regime_gate.get("closed"):
+            logger.debug("%s: held back by regime gate (%s)",
+                         symbol, self._regime_gate.get("reason"))
+            return dash_row
 
         # ---- Options routing (opt-in): strong signal -> long call/put --- #
         # A qualifying signal buys an ATM option instead of the stock. If no
@@ -1053,6 +1105,7 @@ class TradingAgent:
             "closed_today": st.closed_today, "managed": managed,
             "options": options,
             "research": self._research_view, "source_status": self._source_status,
+            "regime_gate": self._regime_gate,
         })
 
     def _detect_closed_trades(self, positions, equity) -> None:

@@ -179,6 +179,13 @@ HYBRID_TARGET_ENABLED: bool = True
 # 0.001). Crypto is long-only on Alpaca regardless.
 LONG_ONLY: bool = True
 
+# Regime gate: pause ALL new long entries while SPY is below its 50-day EMA
+# (a risk-off tape). Stops the long-only book from opening fresh longs into a
+# falling market. Affects NEW entries only — open positions keep their normal
+# stops/targets/trailing/scale-outs and are never force-closed. Set False to
+# trade entries regardless of the market trend.
+REGIME_GATE_ENABLED: bool = True
+
 # --------------------------------------------------------------------------- #
 # Crypto activation (2026-06-10)
 # --------------------------------------------------------------------------- #
