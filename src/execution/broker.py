@@ -152,7 +152,12 @@ class Broker:
                 symbol=plan.symbol,
                 qty=trade.qty,
                 side=side,
-                time_in_force=TimeInForce.DAY,
+                # GTC so the stop/target child legs rest at the broker across
+                # sessions — DAY would expire them at the close, leaving the
+                # position naked overnight and during any agent downtime. The
+                # market entry still fills immediately (entries are only placed
+                # while the session is open), so GTC only governs the children.
+                time_in_force=TimeInForce.GTC,
                 order_class=OrderClass.BRACKET,
                 take_profit=TakeProfitRequest(limit_price=_round_price(plan.target)),
                 stop_loss=StopLossRequest(stop_price=_round_price(plan.stop)),
@@ -265,7 +270,10 @@ class Broker:
         try:
             order = LimitOrderRequest(
                 symbol=plan.symbol, qty=trade.qty, side=side,
-                time_in_force=TimeInForce.DAY, limit_price=limit_price,
+                # GTC so the protective child legs persist across sessions (see
+                # place_bracket_order). A pullback limit entry that doesn't fill
+                # also rests rather than expiring at the close.
+                time_in_force=TimeInForce.GTC, limit_price=limit_price,
                 order_class=OrderClass.BRACKET,
                 take_profit=TakeProfitRequest(limit_price=target_px),
                 stop_loss=StopLossRequest(stop_price=stop_px),
@@ -352,7 +360,8 @@ class Broker:
             exit_side = OrderSide.SELL if side == "long" else OrderSide.BUY
             req = LimitOrderRequest(
                 symbol=symbol.replace("/", ""), qty=qty, side=exit_side,
-                time_in_force=TimeInForce.DAY, order_class=OrderClass.OCO,
+                # GTC so re-armed protection rests across sessions / downtime.
+                time_in_force=TimeInForce.GTC, order_class=OrderClass.OCO,
                 limit_price=_round_price(target),
                 take_profit=TakeProfitRequest(limit_price=_round_price(target)),
                 stop_loss=StopLossRequest(stop_price=_round_price(stop)))
