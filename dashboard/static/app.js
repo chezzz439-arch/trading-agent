@@ -396,6 +396,171 @@ async function renderCryptoPage() {
   $$(".wcard", page).forEach((c) => c.onclick = () => openSymbolModal(c.dataset.sym));
 }
 
+/* =================== ORDERS =================== */
+const fmtAgo = (iso) => {
+  if (!iso) return "—";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+const fmtDur = (s) => {
+  if (s == null) return "—";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+};
+
+async function renderOrders() {
+  const page = $("#page-orders");
+  let d;
+  try { d = await api("orders"); } catch { return showError(page); }
+  const s = d.summary || {}, pending = d.pending || [], prot = d.protective || [], fills = d.filled || [];
+
+  let html = `
+    <div class="card hero" style="padding-bottom:16px">
+      <div class="label">Order desk</div>
+      <div class="today" style="font-size:17px;margin-top:6px">
+        ${s.pending ?? 0} pending · ${s.queued ?? 0} queued for the open · ${s.filled_today ?? 0} filled today</div>
+      <div class="wfoot" style="margin-top:8px">
+        <span>${s.protective ?? 0} protective exit${s.protective === 1 ? "" : "s"} working</span>
+        ${s.waiting_to_arm ? `<span>${s.waiting_to_arm} more arm${s.waiting_to_arm === 1 ? "s" : ""} when pending entries fill</span>` : ""}
+        <span>${d.market_open ? "🟢 market open — orders execute live" : "🌙 market closed — stock orders wait for the bell"}</span>
+      </div>
+    </div>`;
+
+  html += `<h2 class="section">Waiting to open</h2>`;
+  if (pending.length) {
+    html += `<div class="watchgrid">` + pending.map((o) => `
+      <div class="card hoverable">
+        <div class="whead"><span class="sym" style="font-size:16px">${esc(o.symbol)}</span>
+          <span class="wname">${esc(o.name || (o.option ? "option contract" : ""))}</span>
+          ${o.queued ? `<span class="pill neutral">queued for open</span>` : `<span class="pill bullish">working</span>`}</div>
+        <div class="posmeta" style="margin-top:10px;margin-bottom:6px">
+          <div class="m"><div class="k">Side / type</div><div class="v">${esc(o.side)} ${esc(o.type)}</div></div>
+          <div class="m"><div class="k">Qty</div><div class="v">${fmtNum(o.qty, o.qty % 1 ? 4 : 0)}</div></div>
+          <div class="m"><div class="k">Limit</div><div class="v">${fmt$(o.limit_price)}</div></div>
+          <div class="m"><div class="k">Last</div><div class="v">${fmt$(o.last)}</div></div>
+        </div>
+        <div class="wreasons"><span>${esc(o.plain)}</span></div>
+        <div class="wfoot"><span>submitted ${fmtAgo(o.submitted_at)}</span><span>status: ${esc(o.status)}</span></div>
+      </div>`).join("") + `</div>`;
+  } else {
+    html += `<div class="card empty">No entry orders working — the bot places one the moment a setup clears its gate.</div>`;
+  }
+
+  html += `<h2 class="section">Protecting open positions</h2>`;
+  if (prot.length) {
+    html += `<div class="card" style="overflow-x:auto"><table class="trades"><thead><tr>
+      <th>Symbol</th><th>Protection</th><th>Qty</th><th>Triggers at</th><th>Last</th><th>Distance</th><th>Status</th></tr></thead><tbody>
+      ${prot.map((o) => `<tr${o.armed ? "" : ` style="opacity:.55"`}>
+        <td><b>${esc(o.symbol)}</b></td>
+        <td><span class="pill ${o.kind === "take_profit" ? "bullish" : "bearish"}" style="margin-left:0">${o.kind === "take_profit" ? "take profit" : "stop loss"}</span></td>
+        <td>${fmtNum(o.qty, o.qty % 1 ? 4 : 0)}</td>
+        <td class="${o.kind === "take_profit" ? "up" : "down"}">${fmt$(o.price)}</td>
+        <td>${fmt$(o.last)}</td>
+        <td>${o.away_pct == null ? "—" : fmtPct(o.away_pct, 1) + " away"}</td>
+        <td style="color:var(--text-dim)">${o.armed ? esc(o.status) : "arms after entry fills"}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  } else {
+    html += `<div class="card empty">No protective orders working right now.</div>`;
+  }
+
+  html += `<h2 class="section">Recently filled — last 7 days</h2>`;
+  if (fills.length) {
+    html += `<div class="card" style="overflow-x:auto"><table class="trades"><thead><tr>
+      <th>Filled</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th></tr></thead><tbody>
+      ${fills.map((o) => `<tr>
+        <td style="color:var(--text-dim)">${new Date(o.filled_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+        <td><b>${esc(o.symbol)}</b>${o.option ? ` <span style="color:var(--accent);font-size:11px">option</span>` : ""}</td>
+        <td class="${o.side === "buy" ? "up" : "down"}">${esc(o.side)}</td>
+        <td>${esc(o.type)}</td>
+        <td>${fmtNum(o.filled_qty ?? o.qty, (o.filled_qty ?? o.qty) % 1 ? 4 : 0)}</td>
+        <td>${fmt$(o.filled_avg_price)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  } else {
+    html += `<div class="card empty">Nothing filled in the last 7 days.</div>`;
+  }
+  page.innerHTML = html;
+}
+
+/* =================== BOT =================== */
+async function renderBot() {
+  const page = $("#page-bot");
+  let d;
+  try { d = await api("bot"); } catch { return showError(page); }
+  const st = d.status || {}, k = d.kill || {};
+
+  const meter = (usedFrac, pct, limitPct, pnl, label) => {
+    const f = usedFrac == null ? 0 : usedFrac;
+    const color = f < 0.5 ? "var(--green)" : f < 0.8 ? "var(--amber)" : "var(--red)";
+    return `<div style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim)">
+        <span>${label}: <b class="${cls(pnl)}">${fmt$(pnl)} (${fmtPct(pct)})</b></span>
+        <span>halts at ${fmtNum(limitPct, 0)}%</span></div>
+      <div class="meter"><div class="fill" style="width:${Math.max(2, f * 100)}%;background:${color}"></div></div>
+      <div style="font-size:11px;color:var(--text-faint)">${pct == null ? "no data yet" :
+        f >= 1 ? "⛔ limit hit — trading halted" : `${Math.round(f * 100)}% of the buffer used`}</div>
+    </div>`;
+  };
+
+  page.innerHTML = `
+    <div class="card hero" style="padding-bottom:18px">
+      <div class="label">Bot health</div>
+      <div class="equity" style="font-size:26px;display:flex;align-items:center;gap:10px">
+        <span class="dot ${st.online ? "on" : "off"}" style="width:11px;height:11px"></span>
+        ${st.halted ? `<span class="down">HALTED — kill switch</span>`
+          : st.online ? `<span class="up">RUNNING</span>` : `<span class="down">OFFLINE</span>`}
+        <span style="font-size:13px;color:var(--text-dim);font-weight:500">${esc(st.mode || "")} mode · scans every ${st.scan_interval ?? "—"}s</span>
+      </div>
+      <div class="wfoot" style="margin-top:10px">
+        <span>last scan ${fmtAgo(st.last_scan)}</span>
+        <span>uptime ${fmtDur(st.uptime_s)}</span>
+        <span>${st.scans_today ?? 0} scans today</span>
+        <span>${st.market_open ? "🟢 market open" : "🌙 market closed"}</span>
+      </div>
+    </div>
+
+    <h2 class="section">Risk &amp; kill switch</h2>
+    <div class="card">
+      ${meter(k.daily_used_frac, k.daily_pct, k.daily_limit_pct, k.daily_pnl, "Today")}
+      ${meter(k.weekly_used_frac, k.weekly_pct, k.weekly_limit_pct, k.weekly_pnl, "This week")}
+      <div class="wfoot" style="margin-top:12px">
+        <span>also halts after ${k.max_consecutive_losses} consecutive losing trades</span>
+        <span>measured from the bot's day-start equity — the Overview hero shows change since prior market close</span></div>
+    </div>
+
+    <h2 class="section">Connections</h2>
+    <div class="card">
+      ${(d.connections || []).map((c) => `
+        <div class="connrow"><span class="dot ${c.ok ? "on" : "off"}"></span>
+          <b>${esc(c.name)}</b><span style="color:var(--text-dim)">${esc(c.detail)}</span>
+          <span style="margin-left:auto;color:${c.ok ? "var(--green)" : "var(--red)"};font-weight:600">${c.ok ? "connected" : "down"}</span></div>`).join("")}
+      ${Object.keys(d.sources || {}).length ? `
+        <div class="connrow" style="border-bottom:none;flex-wrap:wrap">
+          <b>Research sources</b>
+          ${Object.entries(d.sources).map(([name, v]) => `
+            <span style="color:${v === "ok" ? "var(--green)" : "var(--amber)"};font-size:12px">● ${esc(name)}</span>`).join("")}
+        </div>` : ""}
+    </div>
+
+    <h2 class="section">Active strategies</h2>
+    <div class="card">
+      ${(d.strategies || []).map((sgy) => `
+        <div class="connrow">
+          <span class="pill ${sgy.active ? "bullish" : "avoid"}" style="margin-left:0">${sgy.active ? "ON" : "OFF"}</span>
+          <b>${esc(sgy.name)}</b>
+          <span style="color:var(--text-dim);font-size:12.5px">${esc(sgy.desc)}</span></div>`).join("")}
+    </div>
+
+    <h2 class="section">Current settings</h2>
+    <div class="cfggrid">
+      ${(d.settings || []).map((cgf) => `
+        <div class="cfg"><div class="k">${esc(cgf.k)}</div><div class="v">${esc(cgf.v)}</div></div>`).join("")}
+    </div>`;
+}
+
 /* =================== REASONING =================== */
 async function renderReasoning() {
   const page = $("#page-reasoning");
@@ -593,7 +758,7 @@ function showError(page) {
     <span style="font-size:12.5px">It retries automatically every ${REFRESH_MS / 1000}s.</span></div>`;
 }
 
-const RENDER = { overview: renderOverview, positions: renderPositions, options: renderOptionsPage, crypto: renderCryptoPage, reasoning: renderReasoning, watching: renderWatching, performance: renderPerformance };
+const RENDER = { overview: renderOverview, positions: renderPositions, orders: renderOrders, reasoning: renderReasoning, watching: renderWatching, options: renderOptionsPage, crypto: renderCryptoPage, performance: renderPerformance, bot: renderBot };
 let current = "overview";
 
 function route() {

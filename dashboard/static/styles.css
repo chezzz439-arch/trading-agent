@@ -203,6 +203,7 @@ details.why[open] summary::before { transform: rotate(90deg); }
 .pill.bullish { background: var(--green-soft); color: var(--green); }
 .pill.neutral { background: rgba(245,166,35,.12); color: var(--amber); }
 .pill.avoid   { background: var(--bg-elev); color: var(--text-faint); }
+.pill.bearish { background: var(--red-soft); color: var(--red); }
 .scorebar { margin: 12px 0 4px; }
 .scorebar .track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; position: relative; }
 .scorebar .gate-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-faint); }
@@ -241,6 +242,16 @@ table.trades tbody tr:hover { background: var(--bg-elev); }
 /* ---------- options ---------- */
 .optgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 11px; }
 
+/* ---------- bot page ---------- */
+.meter { height: 10px; border-radius: 5px; background: var(--border); overflow: hidden; margin: 6px 0 4px; }
+.meter .fill { height: 100%; border-radius: 5px; transition: width .5s ease; }
+.connrow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.connrow:last-child { border-bottom: none; }
+.cfggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 8px; }
+.cfg { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 9px 12px; }
+.cfg .k { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; }
+.cfg .v { font-size: 13.5px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
 /* ---------- skeleton / empty ---------- */
 .skeleton { background: linear-gradient(90deg, var(--card) 25%, var(--card-hover) 50%, var(--card) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius); height: 120px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
@@ -252,7 +263,9 @@ table.trades tbody tr:hover { background: var(--bg-elev); }
 /* ---------- responsive ---------- */
 @media (max-width: 760px) {
   .topbar { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
-  nav { order: 3; width: 100%; overflow-x: auto; }
+  nav { order: 3; width: 100%; overflow-x: auto;
+        -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
+        mask-image: linear-gradient(90deg, #000 90%, transparent); }
   .statusline { margin-left: auto; }
   main { padding: 18px 14px 70px; }
   .hero .equity { font-size: 32px; }

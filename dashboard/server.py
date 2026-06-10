@@ -559,6 +559,165 @@ def api_positions():
 
 
 # --------------------------------------------------------------------------- #
+# Orders page — read-only view of every working / queued / filled order
+# --------------------------------------------------------------------------- #
+def _crypto_slash_map() -> dict[str, str]:
+    """'BTCUSD' -> 'BTC/USD' for every watched pair (orders may come unslashed)."""
+    return cached("crypto_slash", 3600, lambda: {
+        s.replace("/", ""): s for s in settings.load_watchlist() if is_crypto(s)})
+
+
+def _display_symbol(sym: str) -> str:
+    return _crypto_slash_map().get(sym, sym)
+
+
+def _last_price(symbol: str) -> float | None:
+    """Live position price when held, else last daily close. Best-effort."""
+    try:
+        for p in alpaca_positions():
+            if p.symbol in (symbol, symbol.replace("/", "")) and p.current_price:
+                return float(p.current_price)
+    except Exception:
+        pass
+
+    def _fetch():
+        df = _feed.get_bars(symbol, "1Day", 3)
+        return float(df["close"].iloc[-1]) if df is not None and not df.empty else None
+    try:
+        return cached(f"lastpx:{symbol}", 120, _fetch)
+    except Exception:
+        return None
+
+
+def _order_row(o) -> dict:
+    def f(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+    sym = _display_symbol(o.symbol or "")
+    return {
+        "id": str(o.id), "symbol": sym,
+        "option": len(o.symbol or "") > 10 and "/" not in sym,
+        "side": str(o.side).split(".")[-1].lower(),
+        "type": str(getattr(o, "order_type", None) or getattr(o, "type", "") or "").split(".")[-1].lower(),
+        "qty": f(o.qty) if o.qty is not None else f(getattr(o, "notional", None)),
+        "limit_price": f(o.limit_price), "stop_price": f(o.stop_price),
+        "status": str(o.status).split(".")[-1].lower(),
+        "submitted_at": o.submitted_at.isoformat() if o.submitted_at else None,
+        "filled_at": o.filled_at.isoformat() if o.filled_at else None,
+        "filled_avg_price": f(o.filled_avg_price),
+        "filled_qty": f(getattr(o, "filled_qty", None)),
+        "order_class": str(getattr(o, "order_class", "") or "").split(".")[-1].lower(),
+    }
+
+
+@app.get("/api/orders")
+def api_orders():
+    clock = cached("clock", 30, lambda: _trading.get_clock())
+    market_open = bool(getattr(clock, "is_open", False))
+
+    def _open():
+        return _trading.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.OPEN, nested=True, limit=200))
+
+    def _recent():
+        return _trading.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED, limit=150,
+            after=datetime.now(timezone.utc) - timedelta(days=7)))
+
+    try:
+        raw_open = cached("orders_open", 15, _open)
+    except Exception as e:
+        log.warning("open orders: %s", e)
+        raw_open = []
+    try:
+        raw_recent = cached("orders_recent", 60, _recent)
+    except Exception as e:
+        log.warning("recent orders: %s", e)
+        raw_recent = []
+
+    # Flatten bracket/OCO children so protective legs show individually.
+    flat = []
+    for o in raw_open:
+        flat.append(o)
+        flat.extend(getattr(o, "legs", None) or [])
+
+    DONE = {"filled", "canceled", "cancelled", "expired", "rejected", "replaced"}
+    pending, protective = [], []
+    for o in flat:
+        row = _order_row(o)
+        if row["status"] in DONE:
+            continue
+        sym = row["symbol"]
+        if row["side"] == "buy":
+            last = None if row["option"] else _last_price(sym)
+            dist = (round((row["limit_price"] / last - 1) * 100, 2)
+                    if row["limit_price"] and last else None)
+            queued = (not market_open) and "/" not in sym
+            if row["type"] == "market":
+                plain = ("Market order — executes the moment the market opens"
+                         if queued else "Market order — executes immediately")
+            elif row["limit_price"]:
+                if dist is None:
+                    plain = f"Fills at {row['limit_price']:,.2f} or better"
+                elif dist < 0:
+                    plain = (f"Fills if price dips {abs(dist):.1f}% "
+                             f"to {row['limit_price']:,.2f}")
+                else:
+                    plain = (f"Limit {row['limit_price']:,.2f} sits above the last "
+                             f"price — fills right away unless price gaps "
+                             f"+{dist:.1f}% past it")
+            else:
+                plain = "Working order"
+            name = "" if row["option"] else (company_info(sym).get("name") or "")
+            pending.append({**row, "name": name, "last": last,
+                            "dist_pct": dist, "queued": queued, "plain": plain})
+        else:
+            kind = ("stop_loss" if row["stop_price"] and not row["limit_price"]
+                    else "take_profit" if row["limit_price"] and not row["stop_price"]
+                    else ("stop_loss" if "stop" in row["type"] else "take_profit"))
+            price = row["stop_price"] or row["limit_price"]
+            last = None if row["option"] else _last_price(sym)
+            away = (round((price / last - 1) * 100, 2) if price and last else None)
+            # Bracket legs of a NOT-yet-filled entry sit at status 'held' — they
+            # are inert until the parent fills, not live protection.
+            protective.append({**row, "kind": kind, "price": price,
+                               "last": last, "away_pct": away,
+                               "armed": row["status"] != "held"})
+
+    protective.sort(key=lambda r: r["symbol"])
+    pending.sort(key=lambda r: r.get("submitted_at") or "", reverse=True)
+
+    fills = [_order_row(o) for o in raw_recent
+             if o.filled_at and o.filled_avg_price]
+    fills.sort(key=lambda r: r["filled_at"] or "", reverse=True)
+    # "Today" = the US trading day, not the UTC date (which rolls at 8pm ET).
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    today_ny = datetime.now(ny).date()
+
+    def _ny_date(iso):
+        try:
+            return datetime.fromisoformat(iso).astimezone(ny).date()
+        except (ValueError, TypeError):
+            return None
+    filled_today = sum(1 for r in fills if _ny_date(r["filled_at"]) == today_ny)
+
+    return {
+        "pending": pending, "protective": protective, "filled": fills[:60],
+        "market_open": market_open,
+        "summary": {
+            "pending": len(pending),
+            "queued": sum(1 for p in pending if p["queued"]),
+            "protective": sum(1 for p in protective if p["armed"]),
+            "waiting_to_arm": sum(1 for p in protective if not p["armed"]),
+            "filled_today": filled_today,
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Options page
 # --------------------------------------------------------------------------- #
 def _pretty_date(iso: str) -> str:
@@ -893,6 +1052,170 @@ def api_performance():
         "sharpe": sharpe, "monthly": months,
         "recent": trips[:50],
         "equity": hist,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Bot page — health, kill switch, connections, settings, strategies
+# --------------------------------------------------------------------------- #
+def _log_stats() -> dict:
+    """Last 'Agent started' timestamp + today's scan count from agent logs."""
+    started_at, scans_today = None, 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    for path in sorted(LOGS.glob("agent_2*.log"))[-3:]:
+        try:
+            lines = path.read_text(errors="ignore").splitlines()
+        except OSError:
+            continue
+        for ln in lines:
+            m = _LOG_LINE.match(ln)
+            if not m:
+                continue
+            ts, msg = m.group(1), m.group(2)
+            if "Agent started" in msg:
+                started_at = ts
+            elif "Scan complete" in msg and ts.startswith(today):
+                scans_today += 1
+    return {"started_at": started_at, "scans_today": scans_today}
+
+
+def _telegram_ok() -> bool:
+    try:
+        from src.monitoring.telegram_bot import TelegramNotifier
+        return bool(TelegramNotifier().enabled)   # config check only — sends nothing
+    except Exception:
+        return False
+
+
+@app.get("/api/bot")
+def api_bot():
+    st = state()
+    now = datetime.now(timezone.utc)
+
+    updated = st.get("updated_at")
+    age_s, online = None, False
+    if updated:
+        try:
+            age_s = (now - datetime.fromisoformat(updated)).total_seconds()
+            online = age_s < settings.SCAN_INTERVAL * 2.5
+        except ValueError:
+            pass
+
+    ls = cached("logstats", 30, _log_stats)
+    uptime_s = None
+    if online and ls.get("started_at"):
+        try:
+            uptime_s = max(0.0, (datetime.now() - datetime.strptime(
+                ls["started_at"], "%Y-%m-%d %H:%M:%S")).total_seconds())
+        except ValueError:
+            pass
+
+    clock = cached("clock", 30, lambda: _trading.get_clock())
+
+    # --- kill-switch meter --------------------------------------------------- #
+    equity, daily, weekly = st.get("equity"), st.get("daily_pnl"), st.get("weekly_pnl")
+    day_start = (equity - daily) if (equity is not None and daily is not None) else None
+    week_start = (equity - weekly) if (equity is not None and weekly is not None) else None
+    daily_pct = round(daily / day_start * 100, 2) if day_start else None
+    weekly_pct = round(weekly / week_start * 100, 2) if week_start else None
+    d_lim, w_lim = -settings.DAILY_LOSS_LIMIT * 100, -settings.WEEKLY_LOSS_LIMIT * 100
+    kill = {
+        "halted": bool(st.get("halted")),
+        "daily_pnl": daily, "daily_pct": daily_pct, "daily_limit_pct": d_lim,
+        "daily_used_frac": (round(min(1.0, max(0.0, daily_pct / d_lim)), 3)
+                            if daily_pct is not None else None),
+        "weekly_pnl": weekly, "weekly_pct": weekly_pct, "weekly_limit_pct": w_lim,
+        "weekly_used_frac": (round(min(1.0, max(0.0, weekly_pct / w_lim)), 3)
+                             if weekly_pct is not None else None),
+        "max_consecutive_losses": settings.MAX_CONSECUTIVE_LOSSES,
+    }
+
+    # --- connections ----------------------------------------------------------- #
+    def _alpaca_ok():
+        try:
+            return bool(alpaca_account())
+        except Exception:
+            return False
+
+    def _data_ok():
+        try:
+            df = _feed.get_bars(settings.MARKET_PROXY, "1Day", 5)
+            return df is not None and not df.empty
+        except Exception:
+            return False
+
+    connections = [
+        {"name": "Alpaca trading API",
+         "ok": cached("conn_alpaca", 30, _alpaca_ok),
+         "detail": "paper account" if settings.PAPER else "LIVE account"},
+        {"name": "Market data feed",
+         "ok": cached("conn_data", 60, _data_ok),
+         "detail": f"{settings.STOCK_DATA_FEED} stocks · crypto · options"},
+        {"name": "Telegram alerts",
+         "ok": cached("conn_telegram", 300, _telegram_ok),
+         "detail": "trade + briefing notifications"},
+    ]
+
+    # --- strategies ----------------------------------------------------------- #
+    strategies = [
+        {"name": "Momentum equities (long)", "active": True,
+         "desc": f"Buys stocks scoring {settings.MIN_SCORE:.0f}+ with "
+                 f"{settings.RR_RATIO:.0f}:1 reward-to-risk and relative strength vs SPY."},
+        {"name": "Options — long calls", "active": bool(settings.OPTIONS_ENABLED),
+         "desc": f"{settings.OPTIONS_MIN_SCORE:.0f}+ conviction → ATM call "
+                 f"{settings.OPTIONS_DTE_MIN}–{settings.OPTIONS_DTE_MAX} days out, max "
+                 f"{settings.OPTIONS_MAX_POSITIONS}, sell at +{settings.OPTIONS_PROFIT_TARGET*100:.0f}% "
+                 f"or cut at −{settings.OPTIONS_STOP_LOSS*100:.0f}%."},
+        {"name": "Crypto longs (24/7)", "active": True,
+         "desc": f"Score {settings.MIN_SCORE_CRYPTO:.0f}+, confirmed daily uptrend, "
+                 f"and must be outperforming Bitcoin."},
+        {"name": "Research layer", "active": bool(getattr(settings, "RESEARCH_ENABLED", False)),
+         "desc": "Insider, analyst, news and social data adjust the score by up to ±25 points."},
+        {"name": "ML ensemble", "active": bool(getattr(settings, "ML_ENABLED", False)),
+         "desc": "XGBoost + random-forest probabilities folded into the score; retrained monthly."},
+        {"name": "Hybrid profit targets", "active": bool(getattr(settings, "HYBRID_TARGET_ENABLED", False)),
+         "desc": "Aims at swing structure when it clears 3:1, else falls back to the ATR target."},
+        {"name": "Short selling", "active": not bool(getattr(settings, "LONG_ONLY", True)),
+         "desc": "Disabled — research showed shorts were pure drag on this book."},
+    ]
+
+    # --- settings panel --------------------------------------------------------- #
+    core = ", ".join(sorted(getattr(settings, "CORE_HOLDINGS", []) or [])) or "—"
+    cfg = [
+        {"k": "Min score — stocks", "v": f"{settings.MIN_SCORE:.0f}"},
+        {"k": "Min score — crypto", "v": f"{settings.MIN_SCORE_CRYPTO:.0f}"},
+        {"k": "Min score — options", "v": f"{settings.OPTIONS_MIN_SCORE:.0f}"},
+        {"k": "Reward : risk", "v": f"{settings.RR_RATIO:.0f} : 1"},
+        {"k": "Risk per trade", "v": f"{settings.RISK_PER_TRADE*100:.1f}% of equity"},
+        {"k": "Max single position", "v": f"{settings.MAX_POSITION_PCT*100:.0f}% of equity"},
+        {"k": "Max open positions", "v": str(settings.MAX_CONCURRENT_POSITIONS)},
+        {"k": "Portfolio heat cap", "v": f"{settings.PORTFOLIO_HEAT_MAX*100:.0f}% total open risk"},
+        {"k": "Daily kill switch", "v": f"−{settings.DAILY_LOSS_LIMIT*100:.0f}%"},
+        {"k": "Weekly kill switch", "v": f"−{settings.WEEKLY_LOSS_LIMIT*100:.0f}%"},
+        {"k": "Loss-streak halt", "v": f"{settings.MAX_CONSECUTIVE_LOSSES} in a row"},
+        {"k": "Scan interval", "v": f"every {settings.SCAN_INTERVAL}s"},
+        {"k": "Stop distance", "v": f"{getattr(settings, 'ATR_MULTIPLIER', 1.5)}× ATR"},
+        {"k": "Universe", "v": f"{len(settings.load_watchlist())} symbols"},
+        {"k": "Walled-off core holdings", "v": core},
+    ]
+
+    return {
+        "status": {
+            "online": online, "halted": bool(st.get("halted")),
+            "last_scan": updated, "age_s": round(age_s, 0) if age_s is not None else None,
+            "scan_interval": settings.SCAN_INTERVAL,
+            "uptime_s": round(uptime_s, 0) if uptime_s is not None else None,
+            "scans_today": ls.get("scans_today", 0),
+            "mode": "paper" if settings.PAPER else "live",
+            "market_open": bool(getattr(clock, "is_open", False)),
+            "next_open": str(getattr(clock, "next_open", "")),
+            "equity": equity,
+        },
+        "kill": kill,
+        "connections": connections,
+        "sources": st.get("source_status", {}),
+        "strategies": strategies,
+        "settings": cfg,
     }
 
 
