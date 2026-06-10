@@ -59,11 +59,19 @@ class TradeScore:
 
 
 class MasterScorer:
-    def __init__(self, min_score: float = 70.0, rr_target: float = 5.0):
+    def __init__(self, min_score: float = 70.0, rr_target: float = 5.0,
+                 min_score_crypto: float | None = None):
         self.min_score = min_score
+        # Crypto gets its own (lower) conviction gate — crypto moves faster than
+        # stocks. None -> same gate as equities.
+        self.min_score_crypto = min_score_crypto if min_score_crypto is not None else min_score
         # Reward:risk that earns full marks — keep in sync with the RR filter's
         # ratio so a target-meeting trade isn't penalised when the target moves.
         self.rr_target = rr_target
+
+    def _gate(self, symbol: str) -> float:
+        """Per-asset-class score gate ("/" marks the crypto data/exec path)."""
+        return self.min_score_crypto if "/" in symbol else self.min_score
 
     def prerank_score(self, symbol: str, side: str, technical) -> float:
         """Cheap technical+momentum-only score (0–35) for fast candidate ranking.
@@ -71,7 +79,7 @@ class MasterScorer:
         Uses no network/heavy inputs, so it can rank the whole universe quickly;
         the full pipeline then runs on the top-ranked names.
         """
-        s = TradeScore(symbol=symbol, side=side, min_score=self.min_score)
+        s = TradeScore(symbol=symbol, side=side, min_score=self._gate(symbol))
         return round(self._technical(side, technical, s) + self._momentum(side, technical, s), 1)
 
     def score(
@@ -87,7 +95,7 @@ class MasterScorer:
         plan: Optional[TradePlan] = None,
         research: object = None,
     ) -> TradeScore:
-        s = TradeScore(symbol=symbol, side=side, min_score=self.min_score)
+        s = TradeScore(symbol=symbol, side=side, min_score=self._gate(symbol))
         b = s.breakdown
         # Hard gate 1: long-only, no shorts ever.
         if side != "long":
@@ -184,12 +192,15 @@ class MasterScorer:
         rs20 = q.values.get("rel_strength_20")
         rs60 = q.values.get("rel_strength_60")
         outperf = q.values.get("rs_outperform")
+        # Benchmark is SPY for equities, BTC for crypto (set by the caller via
+        # which market series it feeds the quant layer).
+        bench = "BTC" if "/" in s.symbol and s.symbol != "BTC/USD" else "SPY"
         if outperf is None:                       # no market series -> neutral
-            s.notes.append("rs: SPY unavailable -> neutral")
+            s.notes.append(f"rs: {bench} unavailable -> neutral")
             return MAX_POINTS["relative_strength"] * 0.5
-        if not outperf:                           # hard gate: must beat SPY
+        if not outperf:                           # hard gate: must beat the benchmark
             s.rs_veto = True
-            s.notes.append(f"vetoed: lagging SPY (rs20={rs20:+.3f}, rs60={rs60:+.3f})")
+            s.notes.append(f"vetoed: lagging {bench} (rs20={rs20:+.3f}, rs60={rs60:+.3f})")
             return 0.0
         # Scale points by the strength of outperformance (cap at +10% excess).
         pts = 5 + min(5.0, (max(rs20, 0) + max(rs60, 0)) / 0.10 * 5)

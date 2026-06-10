@@ -145,14 +145,14 @@ def load_watchlist_meta() -> dict:
 # Options (long calls/puts on strong signals — opt-in)
 # --------------------------------------------------------------------------- #
 # When True, a signal scoring >= OPTIONS_MIN_SCORE buys an ATM call (long bias)
-# or ATM put (short bias) instead of the stock/short. Default OFF so the live
-# bot keeps trading equities until this is explicitly enabled.
-OPTIONS_ENABLED: bool = False
-OPTIONS_MIN_SCORE: float = 70.0      # higher conviction bar than the stock MIN_SCORE
+# or ATM put (short bias) instead of the stock/short. Enabled 2026-06-10 on the
+# paper account for live experimentation (80+ conviction only).
+OPTIONS_ENABLED: bool = True
+OPTIONS_MIN_SCORE: float = 80.0      # higher conviction bar than the stock MIN_SCORE
 OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive)
 OPTIONS_DTE_MAX: int = 45
 OPTIONS_RISK_PCT: float = 0.01       # max premium spend per trade = 1% of equity
-OPTIONS_MAX_POSITIONS: int = 3       # max concurrent option positions
+OPTIONS_MAX_POSITIONS: int = 5       # max concurrent option positions
 OPTIONS_PROFIT_TARGET: float = 1.00  # take profit at +100% (premium doubles)
 OPTIONS_STOP_LOSS: float = 0.50      # cut at -50% of premium paid
 OPTIONS_SKIP_EARNINGS: bool = True   # never hold an option through an earnings date
@@ -178,6 +178,20 @@ HYBRID_TARGET_ENABLED: bool = True
 # pure drag (-27.8R, 13% win) while longs carry the edge (+0.455R/trade, perm-p
 # 0.001). Crypto is long-only on Alpaca regardless.
 LONG_ONLY: bool = True
+
+# --------------------------------------------------------------------------- #
+# Crypto activation (2026-06-10)
+# --------------------------------------------------------------------------- #
+# Crypto longs are live 24/7 with their own conviction gate: crypto moves
+# faster than stocks, so the score gate is 65 (vs 70 for equities). The
+# relative-strength hard gate is benchmarked against BTC instead of SPY — a
+# coin must be outperforming Bitcoin to qualify (BTC itself is measured
+# against SPY). Entries additionally require a confirmed uptrend on the daily
+# timeframe (close > EMA21 > EMA50). Shorts remain off (Alpaca can't short
+# crypto, and LONG_ONLY governs regardless).
+MIN_SCORE_CRYPTO: float = 65.0
+CRYPTO_RS_BENCHMARK: str = "BTC/USD"
+CRYPTO_REQUIRE_DAILY_UPTREND: bool = True
 
 # --------------------------------------------------------------------------- #
 # Monitoring

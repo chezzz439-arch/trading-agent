@@ -80,7 +80,8 @@ class TradingAgent:
         self.mtf = MTFConfluence(self.feed, timeframes=settings.MTF_TIMEFRAMES,
                                  lookback=settings.LOOKBACK_BARS,
                                  min_confluence=settings.MIN_CONFLUENCE)
-        self.scorer = MasterScorer(min_score=settings.MIN_SCORE, rr_target=settings.RR_RATIO)
+        self.scorer = MasterScorer(min_score=settings.MIN_SCORE, rr_target=settings.RR_RATIO,
+                                   min_score_crypto=settings.MIN_SCORE_CRYPTO)
         # Research layer (insider/analyst/news/social + earnings). Error-safe;
         # contributes a clamped +/-25 to the score and can veto/size trades.
         self.research = ResearchEngine(enabled=settings.RESEARCH_ENABLED)
@@ -380,7 +381,8 @@ class TradingAgent:
         for c in top:
             try:
                 row = self._full_evaluate(c, equity, committed, held_closes,
-                                          sentiment, spy_df)
+                                          sentiment, spy_df,
+                                          btc_df=bars.get(settings.CRYPTO_RS_BENCHMARK))
                 if row is not None:
                     scores_for_dash.append(row)
             except Exception:
@@ -424,7 +426,8 @@ class TradingAgent:
         return {"symbol": symbol, "df": df, "tech": tech, "side": side,
                 "pre_score": pre_score}
 
-    def _full_evaluate(self, c, equity, committed, held_closes, sentiment, spy_df):
+    def _full_evaluate(self, c, equity, committed, held_closes, sentiment, spy_df,
+                       btc_df=None):
         """Expensive pass on a pre-ranked candidate: quant/regime/MTF/ML -> score
         -> risk gates -> sized entry. Reuses the candidate's df + technical.
 
@@ -436,7 +439,14 @@ class TradingAgent:
             return None   # long-term hold — the bot never trades core holdings
 
         # ---- Phases 2-6 ------------------------------------------------- #
-        quant = self.quant.analyze(df, market_df=spy_df if not spy_df.empty else None)
+        # Relative-strength benchmark: SPY for equities, BTC for crypto (a coin
+        # must outperform Bitcoin to qualify). BTC itself is measured vs SPY.
+        if is_crypto(symbol) and symbol != settings.CRYPTO_RS_BENCHMARK \
+                and btc_df is not None and not btc_df.empty:
+            market_df = btc_df
+        else:
+            market_df = spy_df if not spy_df.empty else None
+        quant = self.quant.analyze(df, market_df=market_df)
         regime = self.regime_detector.detect(df, vix=sentiment.vix,
                                              spy_df=spy_df if not spy_df.empty else None)
         mtf = self.mtf.analyze(symbol)
@@ -480,12 +490,27 @@ class TradingAgent:
         if not self._market_open and not is_crypto(symbol):
             return dash_row
 
+        # ---- Crypto entry confirmation: daily uptrend required ---------- #
+        # A crypto long only fires once the daily timeframe shows a confirmed
+        # uptrend (close > EMA21 > EMA50). The symbol is still scored above for
+        # the dashboard either way.
+        if is_crypto(symbol) and settings.CRYPTO_REQUIRE_DAILY_UPTREND:
+            e21 = tech.values.get("ema21")
+            e50 = tech.values.get("ema50")
+            px = float(df["close"].iloc[-1])
+            if not (e21 and e50 and px > e21 > e50):
+                logger.info("%s: crypto long held back — daily uptrend not confirmed "
+                            "(close=%.2f ema21=%s ema50=%s)", symbol, px,
+                            f"{e21:.2f}" if e21 else "n/a",
+                            f"{e50:.2f}" if e50 else "n/a")
+                return dash_row
+
         # ---- Options routing (opt-in): strong signal -> long call/put --- #
         # A qualifying signal buys an ATM option instead of the stock. If no
         # viable/affordable contract exists, fall through to the equity path so
         # the signal isn't wasted.
         if self.options is not None and score.total >= settings.OPTIONS_MIN_SCORE:
-            if self._maybe_enter_option(symbol, side, df, score.total, equity):
+            if self._maybe_enter_option(symbol, side, df, score, equity):
                 return dash_row
 
         # ---- Phase 8: risk gates + sizing ------------------------------- #
@@ -764,7 +789,10 @@ class TradingAgent:
     # Options (opt-in) — entry routing + lifecycle management
     # ------------------------------------------------------------------ #
     def _maybe_enter_option(self, symbol, side, df, score, equity) -> bool:
-        """Try to express a strong signal as a long call/put. Returns True on entry."""
+        """Try to express a strong signal as a long call/put. Returns True on entry.
+
+        ``score`` is the full TradeScore so the Telegram alert can carry the
+        actual reasoning (total + the components that earned it)."""
         if is_crypto(symbol):
             return False
         if len(self.option_positions) >= settings.OPTIONS_MAX_POSITIONS:
@@ -775,7 +803,7 @@ class TradingAgent:
             return False   # already have an option on this underlying
 
         price = float(df["close"].iloc[-1])
-        plan = self.options.plan_trade(symbol, side, price, equity, score)
+        plan = self.options.plan_trade(symbol, side, price, equity, score.total)
         if plan is None:
             return False
         q = plan.quote
@@ -783,11 +811,17 @@ class TradingAgent:
         if order is None:
             return False
 
+        # "because [reasoning]": top scoring components, human-readable.
+        top = sorted(((k, v) for k, v in score.breakdown.items() if v > 0),
+                     key=lambda kv: -kv[1])[:3]
+        why = ", ".join(f"{k.replace('_', ' ')} +{v:.0f}" for k, v in top)
+        reason = f"{plan.description} — scored {score.total:.0f}/100 ({why})"
+
         op = OptionPosition(
             symbol=q.symbol, underlying=symbol, type=q.type, strike=q.strike,
             expiration=q.expiration, contracts=plan.contracts,
             premium_paid=q.premium, cost_basis=plan.cost, side_bias=plan.side_bias,
-            score=score, target_premium=plan.target_premium,
+            score=score.total, target_premium=plan.target_premium,
             stop_premium=plan.stop_premium,
             entry_time=datetime.now(timezone.utc).isoformat())
         self.option_positions[q.symbol] = op
@@ -795,11 +829,11 @@ class TradingAgent:
         self._open_risk[q.symbol] = plan.cost   # premium is the defined risk
         logger.info("%s: OPTION ENTERED %s %s x%d @ $%.2f cost=$%.0f score=%.0f — %s",
                     symbol, q.type.upper(), q.symbol, plan.contracts, q.premium,
-                    plan.cost, score, plan.description)
+                    plan.cost, score.total, reason)
         self.notifier.option_bought(
             underlying=symbol, opt_type=q.type, strike=q.strike,
             expiration=q.expiration, contracts=plan.contracts,
-            premium_paid=q.premium, cost=plan.cost, description=plan.description)
+            premium_paid=q.premium, cost=plan.cost, description=reason)
         return True
 
     def _manage_options(self, equity) -> None:
