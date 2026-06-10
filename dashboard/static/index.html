@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">⚡</span> TRADING AGENT <span class="badge" id="mode-badge">PAPER</span></div>
+    <nav id="nav">
+      <a href="#/overview" data-page="overview" class="active">Overview</a>
+      <a href="#/positions" data-page="positions">Positions</a>
+      <a href="#/reasoning" data-page="reasoning">Reasoning</a>
+      <a href="#/watching" data-page="watching">Watching</a>
+      <a href="#/performance" data-page="performance">Performance</a>
+    </nav>
+    <div class="statusline">
+      <span id="agent-status"><span class="dot idle"></span>connecting…</span>
+      <span id="market-status"></span>
+      <span class="updated" id="updated"></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="offline-banner" id="offline-banner">
+      ⚠️ The trading agent looks offline — its state file hasn't updated recently. Data below may be stale.
+    </div>
+
+    <section class="page visible" id="page-overview"><div class="skeleton"></div></section>
+    <section class="page" id="page-positions"><div class="skeleton"></div></section>
+    <section class="page" id="page-reasoning"><div class="skeleton"></div></section>
+    <section class="page" id="page-watching"><div class="skeleton"></div></section>
+    <section class="page" id="page-performance"><div class="skeleton"></div></section>
+  </main>
+
+  <div class="modal-bg" id="modal-bg">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
