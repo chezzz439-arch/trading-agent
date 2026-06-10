@@ -185,6 +185,13 @@ def main() -> None:
         notifier.send("*MORNING BRIEFING* ☀️\n" + brief)
         print("Sent to Telegram.")
 
+    # --- IPO watches (d-Matrix etc.) — never let a failure block the brief -- #
+    try:
+        from scripts.ipo_watch import run_watches
+        run_watches()
+    except Exception as exc:
+        print(f"ipo_watch failed: {exc}")
+
 
 if __name__ == "__main__":
     main()
