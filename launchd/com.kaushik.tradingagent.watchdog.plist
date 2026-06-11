@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kaushik.tradingagent.watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/kaushik/trading-agent/scripts/watchdog.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/kaushik/trading-agent</string>
+
+    <!-- Check every 120s, around the clock (the agent scans crypto 24/7). -->
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <!-- Also run once right after load / login so a crash during downtime
+         recovers without waiting for the first interval. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/kaushik/trading-agent/logs/launchd_watchdog.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/kaushik/trading-agent/logs/launchd_watchdog.err</string>
+</dict>
+</plist>
