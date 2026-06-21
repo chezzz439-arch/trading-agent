@@ -488,6 +488,28 @@ def api_health():
             "halted": st.get("halted", False), "paper": settings.PAPER}
 
 
+def _benchmark_returns() -> list[dict]:
+    """Return 1-day and YTD % change for SPY (S&P 500) and DIA (Dow Jones)."""
+    benchmarks = [("SPY", "S&P 500"), ("DIA", "Dow Jones")]
+    out = []
+    for ticker, label in benchmarks:
+        try:
+            def _fetch(t=ticker):
+                df = _feed.get_bars(t, "1Day", 252)
+                if df is None or df.empty:
+                    return None
+                closes = df["close"]
+                day_chg = (closes.iloc[-1] / closes.iloc[-2] - 1) * 100 if len(closes) >= 2 else None
+                ytd_chg = (closes.iloc[-1] / closes.iloc[0] - 1) * 100 if len(closes) >= 2 else None
+                return {"day": round(day_chg, 2), "ytd": round(ytd_chg, 2), "price": round(float(closes.iloc[-1]), 2)}
+            result = cached(f"bench:{ticker}", 300, _fetch)
+            if result:
+                out.append({"symbol": ticker, "label": label, **result})
+        except Exception:
+            pass
+    return out
+
+
 @app.get("/api/overview")
 def api_overview():
     st = state()
@@ -509,6 +531,7 @@ def api_overview():
         "weekly_pnl": st.get("weekly_pnl"),
         "risk_state": st.get("risk_state"),
         "activity": activity_feed(),
+        "benchmarks": _benchmark_returns(),
     }
 
 
@@ -549,6 +572,35 @@ def position_rows() -> list[dict]:
             "company": {k: info.get(k) for k in ("name", "blurb", "sector", "market_cap")},
             "reasoning": {k: rec.get(k) for k in ("summary", "breakdown", "signals", "research", "rr")},
         })
+    # Also include any Alpaca positions the manager isn't tracking (core holdings,
+    # orphans, manually opened positions).
+    shown = {r["symbol"] for r in out}
+    for sym, lp in live.items():
+        if sym in shown:
+            continue
+        try:
+            cur = float(lp.current_price) if lp.current_price else None
+            entry = float(lp.avg_entry_price) if lp.avg_entry_price else None
+            info = company_info(sym)
+            core = sym in (getattr(settings, "CORE_HOLDINGS", None) or set())
+            out.append({
+                "symbol": sym,
+                "side": "long" if "LONG" in str(getattr(lp, "side", "")).upper() else "short",
+                "qty": float(lp.qty) if lp.qty else None,
+                "entry": entry, "current": cur, "stop": None, "target": None,
+                "value": float(lp.market_value) if lp.market_value else None,
+                "pnl": float(lp.unrealized_pl) if lp.unrealized_pl else None,
+                "pnl_pct": float(lp.unrealized_plpc) * 100 if lp.unrealized_plpc is not None else None,
+                "progress": None, "r_multiple": None,
+                "score": None, "regime": "core_holding" if core else "unmanaged",
+                "breakeven": False, "trailing": False,
+                "tranches": [], "bars_held": None,
+                "company": {k: info.get(k) for k in ("name", "blurb", "sector", "market_cap")},
+                "reasoning": {"summary": "Core long-term hold — not managed by the bot." if core else "Position not tracked by the bot's position manager.", "breakdown": {}, "signals": {}, "research": None, "rr": None},
+            })
+        except Exception:
+            continue
+
     out.sort(key=lambda p: -(p["pnl"] or 0))
     return out
 

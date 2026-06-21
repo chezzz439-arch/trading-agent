@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import signal as signal_module
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -55,6 +56,15 @@ from src.signals.options_strategy import (
 )
 
 logger = logging.getLogger("trading_agent")
+
+
+def pgrep_dashboard() -> bool:
+    """Return True if dashboard/server.py is already running."""
+    try:
+        result = subprocess.run(["pgrep", "-f", "dashboard/server.py"], capture_output=True)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def configure_logging() -> None:
@@ -148,6 +158,7 @@ class TradingAgent:
         self._sent: dict[str, str] = {}          # summary-type -> date/week already sent
         self._pre_scores: dict[str, float] = {}  # last pre-rank score per symbol (tiering)
         self._streamlit_proc = None
+        self._dashboard_proc = None
         self._scan_count = 0
         self._market_open = True   # set each cycle from the Alpaca clock; gates live equity entries
         # Regime gate: recomputed each cycle from SPY vs its 50-day EMA. ``closed``
@@ -213,6 +224,7 @@ class TradingAgent:
                         settings.OPTIONS_MIN_SCORE, len(self.option_positions))
 
         self._start_streamlit()
+        self._start_dashboard()
         self.notifier.startup(mode, eq)
         logger.info("Agent started | mode=%s | %d symbols | interval=%ds | min_score=%.0f",
                     mode, len(self.watchlist), settings.SCAN_INTERVAL, settings.MIN_SCORE)
@@ -249,6 +261,21 @@ class TradingAgent:
         except Exception:
             logger.exception("Could not launch Streamlit (run it manually)")
 
+    def _start_dashboard(self) -> None:
+        """Launch the custom dashboard server as a background subprocess."""
+        if pgrep_dashboard():
+            logger.info("Custom dashboard already running at http://localhost:8765")
+            return
+        try:
+            import subprocess
+            self._dashboard_proc = subprocess.Popen(
+                [sys.executable, "dashboard/server.py"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            logger.info("Custom dashboard launching at http://localhost:8765")
+        except Exception:
+            logger.exception("Could not launch custom dashboard (run it manually)")
+
     def _sleep(self, seconds: int) -> None:
         for _ in range(seconds):
             if not self._running:
@@ -265,6 +292,11 @@ class TradingAgent:
                 self._streamlit_proc.terminate()
             except Exception:
                 pass
+        if self._dashboard_proc is not None:
+            try:
+                self._dashboard_proc.terminate()
+            except Exception:
+                pass
         logger.info("Agent stopped.")
 
     # ------------------------------------------------------------------ #
@@ -274,17 +306,28 @@ class TradingAgent:
         buying_power = self.broker.get_buying_power()
         day_start = self.portfolio._day_start_equity or equity
 
+        # Heartbeat: stamp updated_at immediately so the watchdog never sees a
+        # stale state file during a long scan and kills a healthy process.
+        self.state_store.write_state({
+            "equity": equity, "buying_power": buying_power,
+            "daily_pnl": day_start - equity if day_start else 0,
+            "weekly_pnl": 0, "risk_state": "scanning", "halted": False,
+            "open_positions": [], "scores": [], "closed_today": [],
+            "managed": [], "options": [], "research": {}, "source_status": {},
+            "regime_gate": self._regime_gate,
+        })
+
         # Dashboard HALT button (cross-process control flag).
         halt_reason = self.state_store.halt_requested()
         if halt_reason and not self.portfolio.halted:
             self.portfolio.halted = True
-            self.broker.close_all()
+            self.broker.close_all(skip=frozenset(settings.CORE_HOLDINGS))
             self.notifier.kill_switch(reason=halt_reason, daily_loss=day_start - equity)
             self.dashboard.alert("kill_switch", halt_reason)
             self.state_store.clear_halt()
 
         if self.portfolio.kill_switch_triggered(equity):
-            self.broker.close_all()
+            self.broker.close_all(skip=frozenset(settings.CORE_HOLDINGS))
             self.notifier.kill_switch(reason="risk limit breached",
                                       daily_loss=day_start - equity)
             self.dashboard.alert("kill_switch", "Trading halted — book flattened")
@@ -353,10 +396,14 @@ class TradingAgent:
             except Exception:
                 logger.exception("Pre-rank failed for %s", symbol)
         candidates.sort(key=lambda c: c["pre_score"], reverse=True)
-        top = candidates[: settings.PRERANK_TOP_N]
+        # Crypto always gets deep-analyzed — it trades 24/7 and would otherwise
+        # lose every slot to the larger equity universe by pre_score alone.
+        crypto_candidates = [c for c in candidates if is_crypto(c["symbol"])]
+        equity_top = [c for c in candidates if not is_crypto(c["symbol"])][:settings.PRERANK_TOP_N]
+        top = equity_top + [c for c in crypto_candidates if c not in equity_top]
         logger.info("Pre-ranked %d candidates from %d/%d scanned this cycle (tiered); "
-                    "deep-analyzing top %d", len(candidates), len(scan_set),
-                    len(self.watchlist), len(top))
+                    "deep-analyzing top %d (%d crypto)", len(candidates), len(scan_set),
+                    len(self.watchlist), len(top), len(crypto_candidates))
         # Crypto visibility: it's scanned 24/7 but only enters on a long bias
         # (Alpaca can't short crypto). Surface how many were scanned vs long-
         # eligible so a quiet crypto book is explainable, not invisible.
@@ -511,13 +558,23 @@ class TradingAgent:
         self._research_view[symbol] = self._research_card(research)
         dash_row = {"symbol": symbol, "side": side, "score": score.total,
                     "passed": score.passed, "research": applied}
+        # Options override: a high score with no equity plan can still be expressed
+        # as a long option (the option premium is the defined risk, no 5:1 plan needed).
+        # Try options first; if it enters, return. If not, fall through to normal gate.
+        if (self.options is not None and score.total >= settings.OPTIONS_MIN_SCORE
+                and self._market_open and not is_crypto(symbol)):
+            if self._maybe_enter_option(symbol, side, df, score, equity):
+                return dash_row
+
         # High-score watch alert: 80+ that won't actually trade (no plan / gate).
-        if score.total >= 80 and (not score.passed or plan is None):
+        # Crypto is exempt from the plan gate — Alpaca uses simple market orders
+        # for crypto (no brackets), so a missing 5:1 equity plan shouldn't block entry.
+        if score.total >= 80 and (not score.passed or plan is None) and not is_crypto(symbol):
             self.dashboard.alert("high_score", f"{symbol} {side} scored {score.total:.0f}")
             self.notifier.high_score(symbol=symbol, side=side, score=score.total,
                                      reason="no valid 5:1 plan" if plan is None
                                      else f"gated (score {score.total:.0f})")
-        if not score.passed or plan is None:
+        if (not score.passed or plan is None) and not is_crypto(symbol):
             return dash_row
 
         # ---- Research vetoes (block long/short/trade) ------------------- #
@@ -897,11 +954,20 @@ class TradingAgent:
             op = self.option_positions[sym]
             bpos = broker_opts.get(sym)
             if bpos is None:
+                # Not yet visible on the broker — could be a fill lag on paper
+                # accounts (DAY order takes a few seconds to reflect). Give it
+                # two full scan cycles before treating absence as an expiry.
+                op.missing_scans = getattr(op, "missing_scans", 0) + 1
+                if op.missing_scans < 3:
+                    logger.info("%s: not yet in broker positions (lag? missing_scans=%d)",
+                                sym, op.missing_scans)
+                    continue
                 # Vanished from the broker: settled. If we're at/after expiry it
                 # expired worthless; otherwise treat as an external close at $0.
                 self._finalize_option(op, current_premium=0.0, equity=equity,
                                       action="expiry", reason="Expired worthless")
                 continue
+            op.missing_scans = 0  # reset on successful broker confirmation
             # Alpaca reports option current_price as the per-share premium.
             try:
                 cur = float(getattr(bpos, "current_price", 0) or 0)

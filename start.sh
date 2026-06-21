@@ -64,11 +64,11 @@ kill -0 "$(cat .agent.pid)" 2>/dev/null && ok "agent PID $(cat .agent.pid) → $
 
 # 6) browser -------------------------------------------------------------------
 step "6/7" "Opening dashboard"
-sleep 4  # give Streamlit a moment to boot
-( command -v open >/dev/null && open http://localhost:8501 ) || \
-  ( command -v xdg-open >/dev/null && xdg-open http://localhost:8501 ) || \
-  echo "${YEL}• open http://localhost:8501 manually${NC}"
-ok "dashboard at http://localhost:8501"
+sleep 4  # give the custom dashboard server a moment to boot
+( command -v open >/dev/null && open http://localhost:8765 ) || \
+  ( command -v xdg-open >/dev/null && xdg-open http://localhost:8765 ) || \
+  echo "${YEL}• open http://localhost:8765 manually${NC}"
+ok "dashboard at http://localhost:8765"
 
 # 7) terminal dashboard (foreground) ------------------------------------------
 step "7/7" "Live terminal dashboard (Ctrl+C to exit — agent keeps running)"

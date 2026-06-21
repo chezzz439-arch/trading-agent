@@ -47,7 +47,7 @@ RSI_SHORT_THRESHOLD: float = 50.0  # short requires RSI below this
 # --------------------------------------------------------------------------- #
 # Reward / risk filter
 # --------------------------------------------------------------------------- #
-RR_RATIO: float = 3.0              # minimum acceptable reward:risk (TEMP: lowered from 4.0 to surface live trades)
+RR_RATIO: float = 1.5              # minimum acceptable reward:risk
 ATR_PERIOD: int = 14
 ATR_MULTIPLIER: float = 1.5        # stop distance = ATR * multiplier
 SWING_LOOKBACK: int = 100          # bars scanned for structural path veto
@@ -56,18 +56,18 @@ RR_PATH_VETO: bool = False         # TEMP: relaxed — path-veto was rejecting 1
 # --------------------------------------------------------------------------- #
 # Per-trade risk / position sizing
 # --------------------------------------------------------------------------- #
-RISK_PER_TRADE: float = 0.01       # risk 1% of equity per trade
-MAX_POSITION_PCT: float = 0.10     # cap a single position at 10% of equity
+RISK_PER_TRADE: float = 0.05       # risk 5% of equity per trade
+MAX_POSITION_PCT: float = 0.25     # cap a single position at 25% of equity
 
 # --------------------------------------------------------------------------- #
 # Portfolio risk
 # --------------------------------------------------------------------------- #
 MAX_CONCURRENT_POSITIONS: int = 15
-DAILY_LOSS_LIMIT: float = 0.03      # kill switch at -3% from day-start equity
-WEEKLY_LOSS_LIMIT: float = 0.07     # kill switch at -7% from week-start equity
-MAX_CONSECUTIVE_LOSSES: int = 5     # kill switch after N losing trades in a row
+DAILY_LOSS_LIMIT: float = 0.15      # kill switch at -15% from day-start equity
+WEEKLY_LOSS_LIMIT: float = 0.30     # kill switch at -30% from week-start equity
+MAX_CONSECUTIVE_LOSSES: int = 20    # kill switch after N losing trades in a row
 MAX_CORRELATION: float = 0.70       # block new position too correlated to held
-PORTFOLIO_HEAT_MAX: float = 0.06    # max total open risk across all positions
+PORTFOLIO_HEAT_MAX: float = 0.25    # max total open risk across all positions
 
 # Long-term "core holdings" the bot must NEVER touch — buy-and-hold positions
 # the user manages by hand. The agent won't adopt, manage, time-exit, trade, or
@@ -77,7 +77,7 @@ CORE_HOLDINGS: set[str] = {"NVDA", "MSFT", "GOOGL", "AMZN", "MU", "LLY", "SPCX"}
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 70.0            # minimum 0-100 score required to trade (matches the score-70 OOS validation)
+MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade
 PRERANK_TOP_N: int = 20            # deep-analyze only the top-N pre-ranked names/scan
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
@@ -87,7 +87,7 @@ ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
 # --------------------------------------------------------------------------- #
 SIGNAL_TIMEFRAME: str = "1Hour"            # timeframe entries are taken on
 MTF_TIMEFRAMES: tuple[str, ...] = ("15Min", "1Hour", "4Hour", "1Day", "1Week")
-MIN_CONFLUENCE: int = 3                     # timeframes that must agree
+MIN_CONFLUENCE: int = 2                     # timeframes that must agree
 LOOKBACK_BARS: int = 300                   # bars pulled per request
 
 # --------------------------------------------------------------------------- #
@@ -104,7 +104,7 @@ SCALE_OUT_2_R: float = 3.5         # take second tranche at +3.5R
 SCALE_OUT_FRACTION: float = 0.33   # fraction of initial qty per tranche
 BREAKEVEN_R: float = 2.0           # move stop to entry at +2R
 TRAIL_R: float = 3.0               # start ATR-trailing the stop at +3R
-TIME_EXIT_BARS: int = 10           # close a stalled position after N bars...
+TIME_EXIT_BARS: int = 20           # close a stalled position after N bars...
 TIME_EXIT_MIN_R: float = 1.0       # ...if it hasn't reached this R by then
 
 # --------------------------------------------------------------------------- #
@@ -148,9 +148,9 @@ def load_watchlist_meta() -> dict:
 # or ATM put (short bias) instead of the stock/short. Enabled 2026-06-10 on the
 # paper account for live experimentation (80+ conviction only).
 OPTIONS_ENABLED: bool = True
-OPTIONS_MIN_SCORE: float = 80.0      # higher conviction bar than the stock MIN_SCORE
-OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive)
-OPTIONS_DTE_MAX: int = 45
+OPTIONS_MIN_SCORE: float = 65.0      # higher conviction bar than the stock MIN_SCORE
+OPTIONS_DTE_MIN: int = 21            # days-to-expiration window (inclusive)
+OPTIONS_DTE_MAX: int = 60
 OPTIONS_RISK_PCT: float = 0.01       # max premium spend per trade = 1% of equity
 OPTIONS_MAX_POSITIONS: int = 5       # max concurrent option positions
 OPTIONS_PROFIT_TARGET: float = 1.00  # take profit at +100% (premium doubles)
@@ -184,7 +184,7 @@ LONG_ONLY: bool = True
 # falling market. Affects NEW entries only — open positions keep their normal
 # stops/targets/trailing/scale-outs and are never force-closed. Set False to
 # trade entries regardless of the market trend.
-REGIME_GATE_ENABLED: bool = True
+REGIME_GATE_ENABLED: bool = False
 
 # --------------------------------------------------------------------------- #
 # Crypto activation (2026-06-10)
@@ -203,4 +203,4 @@ CRYPTO_REQUIRE_DAILY_UPTREND: bool = True
 # --------------------------------------------------------------------------- #
 # Monitoring
 # --------------------------------------------------------------------------- #
-STREAMLIT_AUTOSTART: bool = True   # launch the Streamlit dashboard from main.py
+STREAMLIT_AUTOSTART: bool = False  # Streamlit dashboard disabled — using custom dashboard at :8765

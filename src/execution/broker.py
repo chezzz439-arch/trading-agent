@@ -413,11 +413,29 @@ class Broker:
             logger.exception("close_position failed for %s", symbol)
             return False
 
-    def close_all(self) -> None:
-        """Liquidate every open position and cancel working orders (kill switch)."""
+    def close_all(self, skip: frozenset[str] = frozenset()) -> None:
+        """Liquidate open positions and cancel working orders (kill switch).
+
+        Symbols in ``skip`` are left untouched — used to preserve CORE_HOLDINGS.
+        """
         try:
-            logger.warning("Closing ALL positions and cancelling orders")
-            self._client.close_all_positions(cancel_orders=True)
+            if not skip:
+                logger.warning("Closing ALL positions and cancelling orders")
+                self._client.close_all_positions(cancel_orders=True)
+                return
+            positions = self.get_positions()
+            to_close = [p for p in positions if p.symbol not in skip]
+            skipped = [p.symbol for p in positions if p.symbol in skip]
+            if skipped:
+                logger.warning("Kill switch: preserving core holdings %s", skipped)
+            for p in to_close:
+                logger.warning("Kill switch: closing %s", p.symbol)
+                self.close_position(p.symbol)
+            # Cancel all open orders regardless
+            try:
+                self._client.cancel_orders()
+            except Exception:
+                logger.warning("cancel_orders failed during close_all")
         except Exception:
             logger.exception("close_all failed")
 

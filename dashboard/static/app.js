@@ -20,6 +20,50 @@ async function api(path) {
   return r.json();
 }
 
+/* ---------- company names ---------- */
+const COMPANY_NAMES = {
+  AAPL:"Apple",MSFT:"Microsoft",GOOGL:"Alphabet",GOOG:"Alphabet",
+  AMZN:"Amazon",META:"Meta Platforms",NVDA:"NVIDIA",TSLA:"Tesla",
+  AMD:"AMD",INTC:"Intel",AVGO:"Broadcom",QCOM:"Qualcomm",
+  MU:"Micron",AMAT:"Appl. Materials",LRCX:"Lam Research",KLAC:"KLA Corp",
+  ASML:"ASML",ARM:"Arm Holdings",MRVL:"Marvell",NXPI:"NXP Semi",
+  MCHP:"Microchip",TXN:"Texas Instruments",ADI:"Analog Devices",
+  LLY:"Eli Lilly",JNJ:"Johnson & Johnson",PFE:"Pfizer",MRK:"Merck",
+  ABBV:"AbbVie",AMGN:"Amgen",GILD:"Gilead",REGN:"Regeneron",
+  TMO:"Thermo Fisher",DHR:"Danaher",SYK:"Stryker",BSX:"Boston Scientific",
+  MDT:"Medtronic",ABT:"Abbott",ISRG:"Intuitive Surgical",
+  ORCL:"Oracle",IBM:"IBM",NOW:"ServiceNow",CRM:"Salesforce",
+  ADBE:"Adobe",INTU:"Intuit",SNPS:"Synopsys",CDNS:"Cadence",
+  PANW:"Palo Alto",CRWD:"CrowdStrike",FTNT:"Fortinet",NET:"Cloudflare",
+  DDOG:"Datadog",SNOW:"Snowflake",PLTR:"Palantir",MSTR:"MicroStrategy",
+  SPY:"S&P 500 ETF",QQQ:"Nasdaq 100 ETF",
+  XOM:"ExxonMobil",CVX:"Chevron",COP:"ConocoPhillips",SLB:"SLB",VLO:"Valero",
+  WMT:"Walmart",COST:"Costco",TJX:"TJX Companies",HD:"Home Depot",LOW:"Lowe's",
+  MCD:"McDonald's",SBUX:"Starbucks",NKE:"Nike",PG:"Procter & Gamble",
+  KO:"Coca-Cola",PEP:"PepsiCo",PM:"Philip Morris",
+  JPM:"JPMorgan",BAC:"Bank of America",WFC:"Wells Fargo",GS:"Goldman Sachs",
+  V:"Visa",MA:"Mastercard",
+  BA:"Boeing",GE:"GE Aerospace",CAT:"Caterpillar",DE:"John Deere",
+  HON:"Honeywell",RTX:"RTX",ETN:"Eaton",PH:"Parker Hannifin",GEV:"GE Vernova",
+  NFLX:"Netflix",DIS:"Disney",SPOT:"Spotify",CMCSA:"Comcast",
+  UBER:"Uber",DASH:"DoorDash",SHOP:"Shopify",MELI:"MercadoLibre",
+  BKNG:"Booking Holdings",RCL:"Royal Caribbean",
+  LIN:"Linde",NEE:"NextEra Energy",AEP:"AEP",CEG:"Constellation Energy",
+  FCX:"Freeport-McMoRan",NEM:"Newmont",
+  UNH:"UnitedHealth",HCA:"HCA Healthcare",ELV:"Elevance Health",CVS:"CVS Health",
+  ACN:"Accenture",ADP:"ADP",UNP:"Union Pacific",
+  VZ:"Verizon",T:"AT&T",TMUS:"T-Mobile",PDD:"PDD Holdings",
+  ASTS:"AST SpaceMobile",RKLB:"Rocket Lab",
+  ANET:"Arista Networks",HPE:"HP Enterprise",DELL:"Dell",SMCI:"Super Micro",
+  GLW:"Corning",APH:"Amphenol",COHR:"Coherent",CIEN:"Ciena",LITE:"Lumentum",
+  ALAB:"Astera Labs",WDC:"Western Digital",STX:"Seagate",SNDK:"SanDisk",
+  WELL:"Welltower",SHW:"Sherwin-Williams",ROST:"Ross Stores",
+  ON:"ON Semi",TER:"Teradyne",MPWR:"Monolithic Power",
+  PWR:"Quanta Services",FLEX:"Flex",MCK:"McKesson",APP:"AppLovin",
+  CSCO:"Cisco",SNAP:"Snap",PINS:"Pinterest",LYFT:"Lyft",
+};
+const coName = (sym) => COMPANY_NAMES[sym] || "";
+
 /* ---------- chart helpers ---------- */
 Chart.defaults.font.family = "Inter, sans-serif";
 Chart.defaults.color = "#8b93a3";
@@ -51,6 +95,87 @@ function lineChart(canvasId, labels, datasets, opts = {}) {
       },
       ...opts.extra,
     },
+  });
+}
+
+function doughnutChart(canvasId, labels, values, colors, opts = {}) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (charts[canvasId]) charts[canvasId].destroy();
+  const total = values.reduce((a, b) => a + b, 0);
+
+  const externalTooltip = ({ chart, tooltip }) => {
+    let el = document.getElementById(`tt-${canvasId}`);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = `tt-${canvasId}`;
+      el.style.cssText = "position:fixed;pointer-events:none;z-index:9999;opacity:0;transition:opacity .15s;background:#0f1420;border:1.5px solid #3a4255;border-radius:12px;padding:14px 18px;min-width:172px;box-shadow:0 8px 40px rgba(0,0,0,.75);";
+      document.body.appendChild(el);
+    }
+    if (tooltip.opacity === 0) { el.style.opacity = "0"; return; }
+    if (!tooltip.dataPoints?.length) return;
+    const dp = tooltip.dataPoints[0];
+    const idx = dp.dataIndex;
+    const color = Array.isArray(dp.dataset.backgroundColor) ? dp.dataset.backgroundColor[idx] : dp.dataset.backgroundColor;
+    const sym = dp.label;
+    const company = (opts.companies && opts.companies[idx]) || coName(sym);
+    const val = dp.parsed;
+    const pct = total > 0 ? (val / total * 100) : 0;
+    el.style.borderColor = color;
+    el.innerHTML =
+      `<div style="display:flex;align-items:center;gap:10px;margin-bottom:11px">` +
+        `<span style="width:14px;height:14px;border-radius:4px;flex-shrink:0;background:${color};box-shadow:0 0 8px ${color}88"></span>` +
+        `<div>` +
+          `<div style="font-size:17px;font-weight:800;color:#fff;letter-spacing:.4px;line-height:1.1">${sym}</div>` +
+          (company ? `<div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px">${company}</div>` : "") +
+        `</div>` +
+      `</div>` +
+      `<div style="font-size:23px;font-weight:900;color:#fff;letter-spacing:-.5px;margin-bottom:9px">$${val.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</div>` +
+      `<div style="height:6px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;margin-bottom:6px">` +
+        `<div style="height:100%;width:${pct.toFixed(1)}%;background:${color};border-radius:3px;box-shadow:0 0 6px ${color}99"></div>` +
+      `</div>` +
+      `<div style="font-size:12px;font-weight:700;color:rgba(255,255,255,.7)">${pct.toFixed(1)}% of portfolio</div>`;
+    const rect = chart.canvas.getBoundingClientRect();
+    let x = rect.left + tooltip.caretX + 22;
+    const y = Math.max(8, Math.min(rect.top + tooltip.caretY - 30, window.innerHeight - 170));
+    if (x + 192 > window.innerWidth - 8) x = rect.left + tooltip.caretX - 194;
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    el.style.opacity = "1";
+  };
+
+  const legendLabels = { boxWidth: 13, boxHeight: 13, padding: opts.legendPosition === "bottom" ? 12 : 16, font: { size: 13, weight: "600" }, color: "#ffffff" };
+  if (opts.companies) {
+    legendLabels.generateLabels = (chart) => {
+      const ds = chart.data.datasets[0];
+      return chart.data.labels.map((lbl, i) => {
+        const full = opts.companies[i] || "";
+        const short = coName(lbl) || (full.length > 18 ? full.slice(0, 17) + "…" : full);
+        return {
+          text: short ? `${lbl}  ·  ${short}` : lbl,
+          fontColor: "#ffffff",
+          fillStyle: Array.isArray(ds.backgroundColor) ? ds.backgroundColor[i] : ds.backgroundColor,
+          strokeStyle: "rgba(0,0,0,0.3)", lineWidth: 1, hidden: false, index: i,
+        };
+      });
+    };
+  }
+
+  charts[canvasId] = new Chart(canvas, {
+    type: "doughnut",
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: "rgba(0,0,0,0.3)", borderWidth: 2, hoverOffset: 8 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: "62%",
+      animation: { duration: 450 },
+      plugins: {
+        legend: { display: opts.legend !== false, position: opts.legendPosition || "right", labels: legendLabels },
+        tooltip: { enabled: false, external: externalTooltip },
+      },
+    },
+  });
+  canvas.addEventListener("mouseleave", () => {
+    const el = document.getElementById(`tt-${canvasId}`);
+    if (el) el.style.opacity = "0";
   });
 }
 
@@ -170,8 +295,55 @@ async function renderPositions() {
     html = `<div class="card empty"><div class="big">🌙</div>No open positions right now.<br>
       <span style="font-size:12.5px">The bot only trades setups scoring 70+ (65 for crypto) — empty slots in choppy markets are by design.</span></div>`;
   }
+
   if (stocks.length) {
-    html += stocks.map((p) => {
+    const PALETTE = ["#4f8ef7","#00b843","#f5a623","#e05c5c","#9b6bff","#26c6da","#ff7043","#66bb6a","#ab47bc","#ec407a","#8d6e63","#78909c"];
+    const totalVal = stocks.reduce((s, p) => s + (p.value || 0), 0);
+
+    // Benchmarks strip
+    let benchHtml = "";
+    try {
+      const ov = await api("overview");
+      const benches = ov.benchmarks || [];
+      if (benches.length) {
+        benchHtml = `<div class="card" style="margin-bottom:12px;padding:12px 18px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--text-dim);margin-bottom:10px">MARKET BENCHMARKS</div>
+          <div style="display:flex;gap:28px;flex-wrap:wrap">
+            ${benches.map((b) => `<div>
+              <div style="font-size:12px;color:var(--text-dim)">${esc(b.label)} (${esc(b.symbol)})</div>
+              <div style="font-size:15px;font-weight:600;color:var(--text)">$${b.price?.toLocaleString()}</div>
+              <div style="font-size:12px;display:flex;gap:12px;margin-top:2px">
+                <span class="${b.day >= 0 ? "up" : "down"}">${b.day >= 0 ? "▲" : "▼"} ${Math.abs(b.day).toFixed(2)}% today</span>
+                <span class="${b.ytd >= 0 ? "up" : "down"}">${b.ytd >= 0 ? "+" : ""}${b.ytd?.toFixed(1)}% YTD</span>
+              </div>
+            </div>`).join("")}
+          </div>
+        </div>`;
+      }
+    } catch {}
+    html = benchHtml + html;
+
+    html += `<div class="card" style="margin-bottom:18px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:14px;color:var(--text)">Portfolio Allocation <span style="font-weight:400;color:var(--text-dim);font-size:12px">· total $${totalVal.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</span></div>
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <div style="flex:0 0 280px;height:280px"><canvas id="alloc-chart"></canvas></div>
+        <div style="flex:1;min-width:180px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+          ${stocks.map((p, i) => {
+            const pct = totalVal > 0 ? (p.value / totalVal * 100).toFixed(1) : 0;
+            const name = p.company?.name || coName(p.symbol);
+            return `<div style="display:flex;align-items:center;gap:8px">
+              <span style="width:10px;height:10px;border-radius:50%;background:${PALETTE[i % PALETTE.length]};flex-shrink:0"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12.5px;color:var(--text);font-weight:600">${esc(p.symbol)}</div>
+                ${name ? `<div style="font-size:10.5px;color:var(--text-dim);line-height:1.2">${esc(name)}</div>` : ""}
+              </div>
+              <span style="font-size:12px;color:var(--text-dim)">${pct}%</span>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    </div>`;
+    const posCard = (p) => {
       const w = p.progress != null ? Math.round(p.progress * 100) : 0;
       const rsn = p.reasoning || {};
       return `<div class="card poscard hoverable">
@@ -189,22 +361,34 @@ async function renderPositions() {
         <div class="m"><div class="k">Stop</div><div class="v down">${fmt$(p.stop)}</div></div>
         <div class="m"><div class="k">Value</div><div class="v">${fmt$(p.value, 0)}</div></div>
         <div class="m"><div class="k">R now</div><div class="v">${p.r_multiple == null ? "—" : (p.r_multiple >= 0 ? "+" : "") + fmtNum(p.r_multiple, 2) + "R"}</div></div>
-        <div class="m"><div class="k">Score</div><div class="v">${fmtNum(p.score, 0)}</div></div>
+        <div class="m"><div class="k">Score</div><div class="v">${p.score != null ? fmtNum(p.score, 0) : "—"}</div></div>
       </div>
-      <div class="progress"><div class="fill" style="width:${w}%"></div></div>
-      <div class="progress-labels"><span>entry ${fmt$(p.entry)}</span><span>${w}% of the way</span><span>target ${fmt$(p.target)}</span></div>
+      ${p.target ? `<div class="progress"><div class="fill" style="width:${w}%"></div></div>
+      <div class="progress-labels"><span>entry ${fmt$(p.entry)}</span><span>${w}% of the way</span><span>target ${fmt$(p.target)}</span></div>` : ""}
       ${p.breakeven || p.trailing || p.tranches?.length ? `<div class="wfoot" style="margin-top:10px">
         ${p.breakeven ? "<span>🔒 stop at breakeven</span>" : ""}
         ${p.trailing ? "<span>📈 trailing stop active</span>" : ""}
         ${p.tranches?.length ? `<span>✂️ scaled out at ${p.tranches.join(", ")}</span>` : ""}</div>` : ""}
       <details class="why"><summary>Why the bot opened this</summary><div class="whybody">
         ${rsn.summary ? `<div class="summary-line">${esc(rsn.summary)}</div>` : ""}
-        <div class="score-row" style="margin-top:14px">${scoreRing(p.score)}${breakdownBars(rsn.breakdown)}</div>
+        ${rsn.breakdown && Object.keys(rsn.breakdown).length ? `<div class="score-row" style="margin-top:14px">${scoreRing(p.score)}${breakdownBars(rsn.breakdown)}</div>` : ""}
         ${signalLines(rsn.signals)}
         ${researchLines(rsn.research)}
       </div></details>
     </div>`;
-    }).join("");
+    };
+
+    const managed = stocks.filter((p) => p.regime !== "core_holding" && p.regime !== "unmanaged");
+    const longHolds = stocks.filter((p) => p.regime === "core_holding" || p.regime === "unmanaged");
+
+    if (managed.length) {
+      html += `<h2 class="section">🤖 Bot-Managed Positions <span style="font-size:12px;font-weight:400;color:var(--text-dim)">(active stops &amp; targets)</span></h2>`;
+      html += managed.map(posCard).join("");
+    }
+    if (longHolds.length) {
+      html += `<h2 class="section">🏦 Long-Term Holdings <span style="font-size:12px;font-weight:400;color:var(--text-dim)">(buy &amp; hold — not bot-managed)</span></h2>`;
+      html += longHolds.map(posCard).join("");
+    }
   }
 
   html += `<h2 class="section">Options positions</h2>`;
@@ -228,6 +412,10 @@ async function renderPositions() {
     html += `<div class="card empty">No option positions — the bot buys an ATM call when a stock scores 80+.</div>`;
   }
   page.innerHTML = html;
+  if (stocks.length) {
+    const PALETTE = ["#4f8ef7","#00b843","#f5a623","#e05c5c","#9b6bff","#26c6da","#ff7043","#66bb6a","#ab47bc","#ec407a","#8d6e63","#78909c"];
+    doughnutChart("alloc-chart", stocks.map((p) => p.symbol), stocks.map((p) => p.value || 0), stocks.map((_, i) => PALETTE[i % PALETTE.length]), { legend: false, companies: stocks.map((p) => p.company?.name || coName(p.symbol)) });
+  }
 }
 
 /* =================== OPTIONS =================== */
@@ -455,7 +643,7 @@ async function renderOrders() {
     html += `<div class="card" style="overflow-x:auto"><table class="trades"><thead><tr>
       <th>Symbol</th><th>Protection</th><th>Qty</th><th>Triggers at</th><th>Last</th><th>Distance</th><th>Status</th></tr></thead><tbody>
       ${prot.map((o) => `<tr${o.armed ? "" : ` style="opacity:.55"`}>
-        <td><b>${esc(o.symbol)}</b></td>
+        <td><b>${esc(o.symbol)}</b>${coName(o.symbol) ? `<div style="font-size:10px;color:var(--text-dim)">${coName(o.symbol)}</div>` : ""}</td>
         <td><span class="pill ${o.kind === "take_profit" ? "bullish" : "bearish"}" style="margin-left:0">${o.kind === "take_profit" ? "take profit" : "stop loss"}</span></td>
         <td>${fmtNum(o.qty, o.qty % 1 ? 4 : 0)}</td>
         <td class="${o.kind === "take_profit" ? "up" : "down"}">${fmt$(o.price)}</td>
@@ -473,7 +661,7 @@ async function renderOrders() {
       <th>Filled</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th></tr></thead><tbody>
       ${fills.map((o) => `<tr>
         <td style="color:var(--text-dim)">${new Date(o.filled_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
-        <td><b>${esc(o.symbol)}</b>${o.option ? ` <span style="color:var(--accent);font-size:11px">option</span>` : ""}</td>
+        <td><b>${esc(o.symbol)}</b>${o.option ? ` <span style="color:var(--accent);font-size:11px">option</span>` : ""}${coName(o.symbol) ? `<div style="font-size:10px;color:var(--text-dim)">${coName(o.symbol)}</div>` : ""}</td>
         <td class="${o.side === "buy" ? "up" : "down"}">${esc(o.side)}</td>
         <td>${esc(o.type)}</td>
         <td>${fmtNum(o.filled_qty ?? o.qty, (o.filled_qty ?? o.qty) % 1 ? 4 : 0)}</td>
@@ -591,6 +779,7 @@ async function renderReasoning() {
     <div class="card poscard">
       <div class="poshead">
         <span class="sym">${esc(t.symbol)}</span>
+        ${(t.company?.name || coName(t.symbol)) ? `<span class="cname" style="font-size:11px">${esc(t.company?.name || coName(t.symbol))}</span>` : ""}
         <span class="trade-status ${t.status}">${t.status.toUpperCase()}</span>
         <span class="cname">${new Date(t.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
         ${t.status === "closed" && t.exit_pnl != null ? `<span class="pnl-big ${cls(t.exit_pnl)}">${fmt$(t.exit_pnl)}</span>` : ""}
@@ -728,6 +917,13 @@ async function renderPerformance() {
       <div class="card stat"><div class="k">Avg win / loss <span class="tip" data-tip="${TIPS.avgw}">?</span></div>
         <div class="v"><span class="up">${fmt$(p.avg_win, 0)}</span> / <span class="down">${fmt$(p.avg_loss, 0)}</span></div></div>
     </div>
+    <h2 class="section">Portfolio Allocation</h2>
+    <div class="card">
+      <div style="display:flex;gap:32px;align-items:center">
+        <div style="flex:0 0 300px;height:300px"><canvas id="alloc-perf-chart"></canvas></div>
+        <div id="alloc-perf-legend" style="flex:1;min-width:0"></div>
+      </div>
+    </div>
     <h2 class="section">Equity & drawdown</h2>
     <div class="card"><div class="chartwrap"><canvas id="perf-chart"></canvas></div></div>
     <h2 class="section">Monthly returns</h2>
@@ -740,15 +936,15 @@ async function renderPerformance() {
     <h2 class="section">Best & worst trades</h2>
     <div class="stats">
       <div class="card stat"><div class="k">Best</div><div class="v up">${fmt$(p.best.pnl)}</div>
-        <div class="sub">${esc(p.best.symbol)} · ${fmtPct(p.best.pnl_pct, 1)} · ${new Date(p.best.exit_at).toLocaleDateString()}</div></div>
+        <div class="sub">${esc(p.best.symbol)}${coName(p.best.symbol) ? ` (${coName(p.best.symbol)})` : ""} · ${fmtPct(p.best.pnl_pct, 1)} · ${new Date(p.best.exit_at).toLocaleDateString()}</div></div>
       <div class="card stat"><div class="k">Worst</div><div class="v down">${fmt$(p.worst.pnl)}</div>
-        <div class="sub">${esc(p.worst.symbol)} · ${fmtPct(p.worst.pnl_pct, 1)} · ${new Date(p.worst.exit_at).toLocaleDateString()}</div></div>
+        <div class="sub">${esc(p.worst.symbol)}${coName(p.worst.symbol) ? ` (${coName(p.worst.symbol)})` : ""} · ${fmtPct(p.worst.pnl_pct, 1)} · ${new Date(p.worst.exit_at).toLocaleDateString()}</div></div>
     </div>` : ""}
     <h2 class="section">Recent closed trades</h2>
     <div class="card" style="overflow-x:auto">
       ${p.recent?.length ? `<table class="trades"><thead><tr>
         <th>Symbol</th><th>Type</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th><th>%</th><th>Closed</th></tr></thead><tbody>
-        ${p.recent.map((t) => `<tr><td><b>${esc(t.symbol)}</b></td><td>${t.option ? "option" : "stock"}</td>
+        ${p.recent.map((t) => `<tr><td><b>${esc(t.symbol)}</b>${coName(t.symbol) ? `<div style="font-size:10px;color:var(--text-dim)">${coName(t.symbol)}</div>` : ""}</td><td>${t.option ? "option" : "stock"}</td>
           <td>${fmtNum(t.qty, 0)}</td><td>${fmt$(t.entry_px)}</td><td>${fmt$(t.exit_px)}</td>
           <td class="${cls(t.pnl)}">${fmt$(t.pnl)}</td><td class="${cls(t.pnl)}">${fmtPct(t.pnl_pct, 1)}</td>
           <td style="color:var(--text-dim)">${new Date(t.exit_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td></tr>`).join("")}
@@ -765,6 +961,37 @@ async function renderPerformance() {
       y1: { position: "right", ticks: { maxTicksLimit: 4, callback: (v) => v.toFixed(1) + "%" }, grid: { display: false } },
     } } });
   }
+
+  // Portfolio allocation pie chart + custom legend
+  try {
+    const posData = await api("positions");
+    const stocks = (posData.positions || []).filter((p) => p.value > 0);
+    if (stocks.length) {
+      const PALETTE = ["#4f8ef7","#00b843","#f5a623","#e05c5c","#9b6bff","#26c6da","#ff7043","#66bb6a","#ab47bc","#ec407a","#8d6e63","#78909c"];
+      const totalVal = stocks.reduce((s, p) => s + (p.value || 0), 0);
+      doughnutChart("alloc-perf-chart", stocks.map((p) => p.symbol), stocks.map((p) => p.value), stocks.map((_, i) => PALETTE[i % PALETTE.length]), { legend: false, companies: stocks.map((p) => p.company?.name || coName(p.symbol)) });
+      const legendEl = document.getElementById("alloc-perf-legend");
+      if (legendEl) legendEl.innerHTML = stocks.map((p, i) => {
+        const color = PALETTE[i % PALETTE.length];
+        const name = p.company?.name || coName(p.symbol);
+        const pct = totalVal > 0 ? (p.value / totalVal * 100) : 0;
+        return `<div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+          <span style="width:4px;height:38px;border-radius:2px;background:${color};flex-shrink:0"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:700;color:#fff;line-height:1.2">${esc(p.symbol)}</div>
+            ${name ? `<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:1px">${esc(name)}</div>` : ""}
+            <div style="margin-top:5px;height:3px;background:rgba(255,255,255,.08);border-radius:2px">
+              <div style="height:100%;width:${pct.toFixed(1)}%;background:${color};border-radius:2px"></div>
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:13px;font-weight:600;color:#fff">${fmt$(p.value, 0)}</div>
+            <div style="font-size:11.5px;font-weight:600;color:rgba(255,255,255,.5);margin-top:2px">${pct.toFixed(1)}%</div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+  } catch {}
 }
 
 /* =================== shell =================== */

@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # A live asyncio loop per script run (Py3.14 + Alpaca/yfinance otherwise raise
 # "Event loop is closed" across Streamlit reruns).
@@ -23,6 +27,7 @@ except RuntimeError:
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+from alpaca.trading.client import TradingClient
 
 from config import settings
 from src.monitoring.state_store import StateStore
@@ -67,6 +72,47 @@ st.markdown(f"""
 @st.cache_resource
 def get_store() -> StateStore:
     return StateStore(log_dir=settings.LOG_DIR)
+
+
+@st.cache_resource
+def get_alpaca_client() -> TradingClient | None:
+    key, secret = settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY
+    if not key or not secret:
+        return None
+    paper = "paper" in settings.ALPACA_BASE_URL
+    return TradingClient(key, secret, paper=paper)
+
+
+@st.cache_data(ttl=60)
+def fetch_core_holdings() -> list[dict]:
+    client = get_alpaca_client()
+    if not client:
+        return []
+    try:
+        positions = client.get_all_positions()
+    except Exception:
+        return []
+    core = settings.CORE_HOLDINGS
+    result = []
+    for p in positions:
+        sym = p.symbol
+        if sym not in core:
+            continue
+        qty = float(p.qty)
+        avg_entry = float(p.avg_entry_price)
+        current = float(p.current_price or 0)
+        market_val = float(p.market_value or qty * current)
+        cost = float(p.cost_basis or qty * avg_entry)
+        unreal_pl = float(p.unrealized_pl or 0)
+        unreal_plpc = float(p.unrealized_plpc or 0) * 100
+        result.append({
+            "emoji": _emoji(sym), "symbol": sym,
+            "qty": qty, "avg_entry": avg_entry, "current_price": current,
+            "market_value": market_val, "cost_basis": cost,
+            "pnl": unreal_pl, "pnl_pct": unreal_plpc,
+        })
+    result.sort(key=lambda x: x["market_value"], reverse=True)
+    return result
 
 
 def money(x: float, cents: bool = True) -> str:
@@ -180,6 +226,7 @@ def build_live(state: dict) -> dict:
                 "source_status": state.get("source_status", {})},
         "performance": {"sharpe": 0.0, "max_drawdown_pct": 0.0, "max_drawdown_dollar": 0,
                         "avg_winner": 0.0, "avg_loser": 0.0, "monthly": []},
+        "core_holdings": [],
     }
 
 
@@ -191,7 +238,9 @@ def load_data():
     # Generous freshness window: the agent writes state once per scan, so allow a
     # few scan intervals before declaring it offline.
     online = store.is_fresh(max_age_seconds=max(600, settings.SCAN_INTERVAL * 3))
-    return build_live(store.read_state()), online
+    data = build_live(store.read_state())
+    data["core_holdings"] = fetch_core_holdings()
+    return data, online
 
 
 # --------------------------------------------------------------------------- #
@@ -283,6 +332,28 @@ def page_home(d):
             "potential, it buys automatically.</p>"
             "<span class='pill'>Last scan: a few minutes ago</span>"
             "<span class='pill'>Next scan: soon</span></div>", unsafe_allow_html=True)
+
+    core = d.get("core_holdings", [])
+    if core:
+        st.markdown("### Long-Term Holdings")
+        for h in core:
+            making = h["pnl"] >= 0
+            tag = (f"<span class='tag' style='background:#e7f9ee;color:{GREEN}'>UP 🟢</span>"
+                   if making else f"<span class='tag' style='background:#fdeaec;color:{RED}'>DOWN 🔴</span>")
+            st.markdown(f"""
+<div class='card'>
+  <div class='row'>
+    <div class='pos-title'>{h['emoji']} {h['symbol']}</div>{tag}
+  </div>
+  <p class='muted' style='margin:6px 0'>
+    <b>{h['qty']:,.4g}</b> shares · avg entry <b>{money(h['avg_entry'])}</b> ·
+    now <b>{money(h['current_price'])}</b> · value <b>{money(h['market_value'])}</b>
+  </p>
+  <div style='font-size:22px;font-weight:800;color:{col_for(h['pnl'])}'>
+    {signed(h['pnl'])} ({h['pnl_pct']:+.1f}%)
+  </div>
+  <span class='pill'>🔒 Long-term hold — bot won't trade this</span>
+</div>""", unsafe_allow_html=True)
 
     if d.get("activity"):
         st.markdown("### Recent Activity")
