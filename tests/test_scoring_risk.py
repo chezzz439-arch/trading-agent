@@ -90,10 +90,11 @@ def test_mtf_opposed_direction_scores_zero():
 # Portfolio risk
 # --------------------------------------------------------------------------- #
 def test_risk_fraction_scales_with_score():
+    # Aggressive sizing (2026-06-22): 1% near gate, 2% mid, 3% high conviction.
     r = PortfolioRisk()
-    assert r.risk_fraction_for_score(90) == 0.02
-    assert r.risk_fraction_for_score(80) == 0.01
-    assert r.risk_fraction_for_score(72) == 0.005
+    assert r.risk_fraction_for_score(90) == 0.03
+    assert r.risk_fraction_for_score(80) == 0.02
+    assert r.risk_fraction_for_score(72) == 0.01
     assert r.risk_fraction_for_score(60) == 0.0
 
 
@@ -129,7 +130,7 @@ def test_pre_trade_check_blocks_low_score_rr_and_corr():
     assert not r.pre_trade_check(80, 6.0, 0, candidate_corr=0.85,
                                  current_equity=100_000).allowed               # corr
     ok = r.pre_trade_check(80, 6.0, 0, candidate_corr=0.2, current_equity=100_000)
-    assert ok.allowed and ok.risk_fraction == 0.01
+    assert ok.allowed and ok.risk_fraction == 0.02
 
 
 def test_manage_stop_breakeven_and_trail():

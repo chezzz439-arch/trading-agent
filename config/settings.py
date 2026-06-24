@@ -62,12 +62,12 @@ MAX_POSITION_PCT: float = 0.25     # cap a single position at 25% of equity
 # --------------------------------------------------------------------------- #
 # Portfolio risk
 # --------------------------------------------------------------------------- #
-MAX_CONCURRENT_POSITIONS: int = 15
+MAX_CONCURRENT_POSITIONS: int = 25   # was 15
 DAILY_LOSS_LIMIT: float = 0.15      # kill switch at -15% from day-start equity
 WEEKLY_LOSS_LIMIT: float = 0.30     # kill switch at -30% from week-start equity
 MAX_CONSECUTIVE_LOSSES: int = 20    # kill switch after N losing trades in a row
-MAX_CORRELATION: float = 0.70       # block new position too correlated to held
-PORTFOLIO_HEAT_MAX: float = 0.25    # max total open risk across all positions
+MAX_CORRELATION: float = 0.80       # was 0.70 — was blocking borderline correlated names
+PORTFOLIO_HEAT_MAX: float = 0.40    # was 0.25 — allow more capital deployment
 
 # Long-term "core holdings" the bot must NEVER touch — buy-and-hold positions
 # the user manages by hand. The agent won't adopt, manage, time-exit, trade, or
@@ -78,7 +78,7 @@ CORE_HOLDINGS: set[str] = {"NVDA", "MSFT", "GOOGL", "AMZN", "MU", "LLY", "SPCX"}
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
 MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade
-PRERANK_TOP_N: int = 20            # deep-analyze only the top-N pre-ranked names/scan
+PRERANK_TOP_N: int = 40            # was 20 — analyze more candidates per scan
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
 
@@ -112,7 +112,7 @@ TIME_EXIT_MIN_R: float = 1.0       # ...if it hasn't reached this R by then
 # --------------------------------------------------------------------------- #
 SCREEN_MIN_PRICE: float = 15.0        # no low-priced names
 SCREEN_MIN_MARKET_CAP: float = 3e9    # large/mid-cap only
-SCREEN_MIN_AVG_VOLUME: float = 1e6    # liquidity floor (shares/day)
+SCREEN_MIN_AVG_VOLUME: float = 7.5e5  # was 1e6 — loosened to 750k to include more names
 # Absolute path so the watchlist is found regardless of the process's CWD
 # (the Streamlit dashboard and scripts can launch from anywhere).
 WATCHLIST_PATH: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchlist.json")
@@ -149,14 +149,39 @@ def load_watchlist_meta() -> dict:
 # paper account for live experimentation (80+ conviction only).
 OPTIONS_ENABLED: bool = True
 OPTIONS_MIN_SCORE: float = 65.0      # higher conviction bar than the stock MIN_SCORE
-OPTIONS_DTE_MIN: int = 21            # days-to-expiration window (inclusive)
-OPTIONS_DTE_MAX: int = 60
+OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive) — limits theta decay
+OPTIONS_DTE_MAX: int = 45
 OPTIONS_RISK_PCT: float = 0.01       # max premium spend per trade = 1% of equity
 OPTIONS_MAX_POSITIONS: int = 5       # max concurrent option positions
 OPTIONS_PROFIT_TARGET: float = 1.00  # take profit at +100% (premium doubles)
 OPTIONS_STOP_LOSS: float = 0.50      # cut at -50% of premium paid
 OPTIONS_SKIP_EARNINGS: bool = True   # never hold an option through an earnings date
 OPTIONS_EXPIRY_EXIT_DAYS: int = 1    # close at <= N days to expiration (avoid worthless decay)
+
+# --- Rebuilt options entry quality gates (2026-06-23) --------------------- #
+# Fix 1 — post-open entry delay: never buy options within N minutes of the
+# market open (opening IV is inflated; it settles ~45 min in → IV crush).
+OPTIONS_OPEN_DELAY_MIN: int = 45
+# Fix 2 — IV-rank gate: buy premium only when implied vol is NOT expensive.
+# IV rank = where current ATM IV sits in its trailing range (0=cheap, 100=rich).
+# Built from persisted daily IV observations once enough exist; until then a
+# realized-volatility bootstrap proxy is used (clearly logged).
+OPTIONS_IV_RANK_MAX: float = 50.0        # hard block: don't buy premium above this
+OPTIONS_IV_RANK_PREFERRED: float = 30.0  # "cheap premium" — preferred entry zone
+OPTIONS_IV_HISTORY_MIN_SAMPLES: int = 20 # min stored IV samples before trusting true IV-rank
+# Fix 3 — limit orders on contracts: never market-order a wide options spread.
+OPTIONS_MAX_SPREAD_PCT: float = 0.15     # skip if (ask-bid)/mid > 15% (too illiquid)
+OPTIONS_LIMIT_BUFFER_PCT: float = 0.02   # initial limit = mid + 2% toward the ask
+OPTIONS_LIMIT_RETRY_BUFFER_PCT: float = 0.06  # retry limit = mid + 6% toward the ask
+OPTIONS_LIMIT_FILL_WAIT_SEC: int = 30    # bounded wait per attempt (loop-health capped, < 2min)
+# Fix 4 — Greeks-based selection: directional exposure without overpaying.
+OPTIONS_DELTA_MIN: float = 0.55          # target delta band (abs value; puts use |delta|)
+OPTIONS_DELTA_MAX: float = 0.70
+OPTIONS_MAX_THETA_PCT: float = 0.02      # skip if daily theta decay > 2% of premium
+# Loop health: at most one option entry attempt per scan cycle (each does a
+# bounded fill wait + one retry; capping prevents the single-threaded loop from
+# stalling past the watchdog's 600s stale threshold).
+OPTIONS_MAX_ENTRIES_PER_SCAN: int = 1
 
 # --------------------------------------------------------------------------- #
 # Research layer (insider / analyst / news / social + earnings)

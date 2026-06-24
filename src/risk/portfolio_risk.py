@@ -129,13 +129,13 @@ class PortfolioRisk:
         return d
 
     def risk_fraction_for_score(self, score: float) -> float:
-        """Base 1%, up to 2% for high conviction, down to 0.5% near the gate."""
+        """Scale risk with conviction: 1% near gate, 2% mid, 3% high conviction."""
         if score >= 85:
-            return 0.02
+            return 0.03   # was 0.02
         if score >= 75:
-            return 0.01
+            return 0.02   # was 0.01
         if score >= self.min_score:
-            return 0.005
+            return 0.01   # was 0.005
         return 0.0
 
     def adjust_fraction(

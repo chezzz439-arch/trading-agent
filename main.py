@@ -53,6 +53,9 @@ from src.signals.options_strategy import (
     OptionsStrategy,
     crossed_up50,
     exit_decision,
+    fill_price_is_sane,
+    is_option_asset,
+    within_open_delay,
 )
 
 logger = logging.getLogger("trading_agent")
@@ -148,15 +151,35 @@ class TradingAgent:
                 stop_loss=settings.OPTIONS_STOP_LOSS,
                 max_positions=settings.OPTIONS_MAX_POSITIONS,
                 skip_earnings=settings.OPTIONS_SKIP_EARNINGS,
-                expiry_exit_days=settings.OPTIONS_EXPIRY_EXIT_DAYS)
+                expiry_exit_days=settings.OPTIONS_EXPIRY_EXIT_DAYS,
+                delta_min=settings.OPTIONS_DELTA_MIN, delta_max=settings.OPTIONS_DELTA_MAX,
+                max_spread_pct=settings.OPTIONS_MAX_SPREAD_PCT,
+                max_theta_pct=settings.OPTIONS_MAX_THETA_PCT,
+                iv_rank_max=settings.OPTIONS_IV_RANK_MAX,
+                iv_rank_preferred=settings.OPTIONS_IV_RANK_PREFERRED,
+                iv_history_min_samples=settings.OPTIONS_IV_HISTORY_MIN_SAMPLES,
+                limit_buffer_pct=settings.OPTIONS_LIMIT_BUFFER_PCT,
+                log_dir=settings.LOG_DIR)
+            # Loop-health guard: option entries block the single-threaded scan
+            # while waiting on fills (2 attempts each). Warn loudly if a config
+            # change pushes the worst case toward the watchdog's 600s stale kill.
+            worst_block = (settings.OPTIONS_MAX_ENTRIES_PER_SCAN * 2
+                           * settings.OPTIONS_LIMIT_FILL_WAIT_SEC)
+            if worst_block > 300:
+                logger.warning("Options worst-case fill blocking %ds may risk the "
+                               "600s watchdog — lower OPTIONS_MAX_ENTRIES_PER_SCAN "
+                               "or OPTIONS_LIMIT_FILL_WAIT_SEC", worst_block)
         self._ml: dict[str, MLEnsemble] = {}     # per-symbol ensemble cache
         self._running = True
         self._open_risk: dict[str, float] = {}   # symbol -> intended dollar risk
         self._pos_pnl: dict[str, float] = {}     # last seen unrealized PnL per symbol
         self._closed_today: list[dict] = []
         self._closed_by_manager: set[str] = set()  # symbols booked by P9 this cycle (anti-double-count)
+        self._kill_switch_closed: set[str] = set()  # symbols closed by kill switch (excluded from loss tally)
+        self._option_entries_this_scan = 0          # cap option entries/scan (loop health)
         self._sent: dict[str, str] = {}          # summary-type -> date/week already sent
         self._pre_scores: dict[str, float] = {}  # last pre-rank score per symbol (tiering)
+        self._last_trading_day: str = ""          # tracks day boundary for daily risk reset
         self._streamlit_proc = None
         self._dashboard_proc = None
         self._scan_count = 0
@@ -321,13 +344,46 @@ class TradingAgent:
         halt_reason = self.state_store.halt_requested()
         if halt_reason and not self.portfolio.halted:
             self.portfolio.halted = True
+            # Seed the exclusion set BEFORE flattening so _detect_closed_trades
+            # (which runs later this same scan — the HALT branch does not return)
+            # won't re-book each flattened equity as a fresh consecutive loss.
+            try:
+                self._kill_switch_closed |= {
+                    p.symbol for p in self.broker.get_positions()
+                    if p.symbol not in settings.CORE_HOLDINGS
+                    and not is_option_asset(getattr(p, "asset_class", ""))
+                }   # options are excluded here — handled by _drop_options_after_flatten
+            except Exception:
+                pass
             self.broker.close_all(skip=frozenset(settings.CORE_HOLDINGS))
+            self._drop_options_after_flatten()
             self.notifier.kill_switch(reason=halt_reason, daily_loss=day_start - equity)
             self.dashboard.alert("kill_switch", halt_reason)
             self.state_store.clear_halt()
 
-        if self.portfolio.kill_switch_triggered(equity):
+        # Reset kill-switch state at the start of each new trading day so a bad
+        # day doesn't permanently halt the bot. Also refreshes day-start baseline.
+        today_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        if today_str != self._last_trading_day:
+            self._last_trading_day = today_str
+            self.portfolio.set_day_start_equity(equity)
+            self.portfolio._consecutive_losses = 0
+            self.portfolio.halted = False
+            logger.info("New trading day %s — risk counters reset", today_str)
+
+        if not self.portfolio.halted and self.portfolio.kill_switch_triggered(equity):
+            # Capture symbols before closing so _detect_closed_trades won't count
+            # them as consecutive losses (they were force-closed, not organic exits).
+            try:
+                self._kill_switch_closed |= {
+                    p.symbol for p in self.broker.get_positions()
+                    if p.symbol not in settings.CORE_HOLDINGS
+                    and not is_option_asset(getattr(p, "asset_class", ""))
+                }   # options are excluded here — handled by _drop_options_after_flatten
+            except Exception:
+                pass
             self.broker.close_all(skip=frozenset(settings.CORE_HOLDINGS))
+            self._drop_options_after_flatten()
             self.notifier.kill_switch(reason="risk limit breached",
                                       daily_loss=day_start - equity)
             self.dashboard.alert("kill_switch", "Trading halted — book flattened")
@@ -341,6 +397,7 @@ class TradingAgent:
         open_symbols = {p.symbol for p in positions}
         # P9: manage existing positions (scale-outs, dynamic stops, exits) first.
         self._closed_by_manager = set()   # reset per cycle; populated by _finalize_close
+        self._option_entries_this_scan = 0  # reset the per-scan option-entry cap
         self._manage_positions(positions, equity)
         self._detect_closed_trades(positions, equity)
         # Options lifecycle (opt-in): re-price open options, take profit / stop /
@@ -738,6 +795,9 @@ class TradingAgent:
         adopted = []
         for p in positions:
             sym = p.symbol
+            if is_option_asset(getattr(p, "asset_class", "")):
+                continue   # options are managed by _manage_options, NOT as equities
+                           # (arming an ATR equity stop on an OCC symbol is wrong)
             if sym in settings.CORE_HOLDINGS:
                 continue   # long-term hold — never adopt/manage/time-exit it
             if sym in self.managed or sym.replace("/", "") in self.managed:
@@ -900,9 +960,21 @@ class TradingAgent:
     def _maybe_enter_option(self, symbol, side, df, score, equity) -> bool:
         """Try to express a strong signal as a long call/put. Returns True on entry.
 
-        ``score`` is the full TradeScore so the Telegram alert can carry the
-        actual reasoning (total + the components that earned it)."""
+        Entry-quality gates (rebuilt 2026-06-23), in order:
+          1. post-open delay  — no entries within OPTIONS_OPEN_DELAY_MIN of the bell
+          2. per-scan cap     — at most OPTIONS_MAX_ENTRIES_PER_SCAN (loop health)
+          3. plan_trade gates — Greeks (delta band), spread, theta, IV-rank, sizing
+          4. LIMIT order       — at the mid, with one retry at a worse price
+          5. fill validation  — record a position ONLY on a confirmed, sane fill
+
+        ``score`` is the full TradeScore so the alert can carry the reasoning."""
         if is_crypto(symbol):
+            return False
+        # Gate 0 — portfolio halt / kill switch. Options MUST respect the same
+        # halt the equity book does; otherwise a kill-switched account keeps
+        # opening option risk (this is the bypass that flattened the book before).
+        if self.portfolio.halted:
+            logger.info("%s: option skipped — portfolio halted (kill switch)", symbol)
             return False
         if len(self.option_positions) >= settings.OPTIONS_MAX_POSITIONS:
             logger.info("%s: option skipped — at max %d option positions",
@@ -911,39 +983,116 @@ class TradingAgent:
         if any(op.underlying == symbol for op in self.option_positions.values()):
             return False   # already have an option on this underlying
 
+        # Gate 1 — post-open delay (opening IV is inflated; wait for it to settle).
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        if within_open_delay(now_et, settings.OPTIONS_OPEN_DELAY_MIN):
+            logger.info("%s: options entry blocked — within %dmin of open, IV elevated",
+                        symbol, settings.OPTIONS_OPEN_DELAY_MIN)
+            return False
+
+        # Gate 2 — per-scan entry cap (each entry does a bounded fill wait + retry;
+        # capping keeps the single-threaded loop under the watchdog stale window).
+        if self._option_entries_this_scan >= settings.OPTIONS_MAX_ENTRIES_PER_SCAN:
+            logger.info("%s: option skipped — already used %d/%d entries this scan",
+                        symbol, self._option_entries_this_scan,
+                        settings.OPTIONS_MAX_ENTRIES_PER_SCAN)
+            return False
+
+        # ~1y daily closes for the IV-rank HV bootstrap proxy (cheap; ≤1 call/scan).
+        daily_closes: list[float] = []
+        try:
+            ddf = self.feed.get_bars(symbol, "1Day", 300)
+            if ddf is not None and len(ddf):
+                daily_closes = [float(x) for x in ddf["close"].tolist()]
+        except Exception:
+            logger.info("%s: daily bars for IV-rank proxy unavailable", symbol)
+
+        # Gate 3 — selection + quality gates (Greeks, spread, theta, IV-rank, sizing).
         price = float(df["close"].iloc[-1])
-        plan = self.options.plan_trade(symbol, side, price, equity, score.total)
+        plan = self.options.plan_trade(symbol, side, price, equity, score.total,
+                                       daily_closes=daily_closes)
         if plan is None:
             return False
         q = plan.quote
-        order = self.broker.buy_option(q.symbol, plan.contracts)
-        if order is None:
+
+        # Gates 4 + 5 — LIMIT order at the mid, fill validation, one retry worse.
+        self._option_entries_this_scan += 1
+        wait = settings.OPTIONS_LIMIT_FILL_WAIT_SEC
+        filled_qty, fill_px, status = self.broker.buy_option_limit(
+            q.symbol, plan.contracts, plan.limit_price, wait_seconds=wait)
+        if filled_qty < 1:
+            # Retry once nudged further toward the ask, then give up (no phantom).
+            from src.signals.options_strategy import limit_entry_price
+            retry_px = limit_entry_price(q.bid, q.ask, settings.OPTIONS_LIMIT_RETRY_BUFFER_PCT)
+            if retry_px and retry_px > plan.limit_price:
+                logger.info("%s: option limit unfilled (%s) — retrying @ $%.2f",
+                            symbol, status, retry_px)
+                filled_qty, fill_px, status = self.broker.buy_option_limit(
+                    q.symbol, plan.contracts, retry_px, wait_seconds=wait)
+        if filled_qty < 1:
+            logger.info("%s: option NOT entered — limit unfilled (%s), no position recorded",
+                        symbol, status)
             return False
 
-        # "because [reasoning]": top scoring components, human-readable.
+        # Fill validation — guard against phantom/garbage fills before recording.
+        if not fill_price_is_sane(fill_px, q.bid, q.ask):
+            logger.warning("%s: option fill $%.4f outside sane band [%.2f, %.2f] — "
+                           "NOT recording position", symbol, fill_px or 0, q.bid, q.ask)
+            return False
+        if status == "partial":
+            logger.warning("%s: PARTIAL fill %d/%d — recording the filled qty only",
+                           symbol, filled_qty, plan.contracts)
+
+        # Use the REAL fill price and ACTUAL filled qty as the cost basis.
+        contracts = filled_qty
+        cost = round(fill_px * 100 * contracts, 2)
+        target_premium = round(fill_px * (1 + settings.OPTIONS_PROFIT_TARGET), 2)
+        stop_premium = round(fill_px * (1 - settings.OPTIONS_STOP_LOSS), 2)
+
         top = sorted(((k, v) for k, v in score.breakdown.items() if v > 0),
                      key=lambda kv: -kv[1])[:3]
         why = ", ".join(f"{k.replace('_', ' ')} +{v:.0f}" for k, v in top)
-        reason = f"{plan.description} — scored {score.total:.0f}/100 ({why})"
+        reason = (f"{plan.description} — scored {score.total:.0f}/100 ({why}) "
+                  f"[{plan.greeks_line}]")
 
         op = OptionPosition(
             symbol=q.symbol, underlying=symbol, type=q.type, strike=q.strike,
-            expiration=q.expiration, contracts=plan.contracts,
-            premium_paid=q.premium, cost_basis=plan.cost, side_bias=plan.side_bias,
-            score=score.total, target_premium=plan.target_premium,
-            stop_premium=plan.stop_premium,
+            expiration=q.expiration, contracts=contracts,
+            premium_paid=fill_px, cost_basis=cost, side_bias=plan.side_bias,
+            score=score.total, target_premium=target_premium,
+            stop_premium=stop_premium,
+            broker_confirmed=True,   # we confirmed the fill above
             entry_time=datetime.now(timezone.utc).isoformat())
         self.option_positions[q.symbol] = op
         self.option_store.save(self.option_positions)
-        self._open_risk[q.symbol] = plan.cost   # premium is the defined risk
-        logger.info("%s: OPTION ENTERED %s %s x%d @ $%.2f cost=$%.0f score=%.0f — %s",
-                    symbol, q.type.upper(), q.symbol, plan.contracts, q.premium,
-                    plan.cost, score.total, reason)
+        self._open_risk[q.symbol] = cost   # premium is the defined risk
+        logger.info("%s: OPTION ENTERED %s %s x%d @ $%.2f (limit $%.2f) cost=$%.0f "
+                    "score=%.0f — %s", symbol, q.type.upper(), q.symbol, contracts,
+                    fill_px, plan.limit_price, cost, score.total, reason)
         self.notifier.option_bought(
             underlying=symbol, opt_type=q.type, strike=q.strike,
-            expiration=q.expiration, contracts=plan.contracts,
-            premium_paid=q.premium, cost=plan.cost, description=reason)
+            expiration=q.expiration, contracts=contracts,
+            premium_paid=fill_px, cost=cost, description=reason)
         return True
+
+    def _drop_options_after_flatten(self) -> None:
+        """Forget tracked options after the kill switch flattened the book.
+
+        ``broker.close_all`` already sold them at the broker. Clearing them here
+        stops ``_manage_options`` from later seeing them vanish and re-booking
+        each as an "expired worthless" loss toward the consecutive-loss counter
+        (the same double-count the equity path guards against with
+        ``_kill_switch_closed``)."""
+        if not self.option_positions:
+            return
+        dropped = list(self.option_positions.keys())
+        for sym in dropped:
+            self._open_risk.pop(sym, None)
+        self.option_positions.clear()
+        self.option_store.save(self.option_positions)
+        if dropped:
+            logger.warning("Kill switch flattened %d option(s); cleared tracking: %s",
+                           len(dropped), ", ".join(dropped))
 
     def _manage_options(self, equity) -> None:
         if self.options is None or not self.option_positions:
@@ -957,17 +1106,27 @@ class TradingAgent:
                 # Not yet visible on the broker — could be a fill lag on paper
                 # accounts (DAY order takes a few seconds to reflect). Give it
                 # two full scan cycles before treating absence as an expiry.
-                op.missing_scans = getattr(op, "missing_scans", 0) + 1
+                op.missing_scans += 1
                 if op.missing_scans < 3:
                     logger.info("%s: not yet in broker positions (lag? missing_scans=%d)",
                                 sym, op.missing_scans)
                     continue
-                # Vanished from the broker: settled. If we're at/after expiry it
-                # expired worthless; otherwise treat as an external close at $0.
-                self._finalize_option(op, current_premium=0.0, equity=equity,
-                                      action="expiry", reason="Expired worthless")
+                if not op.broker_confirmed:
+                    # Never appeared in broker positions — the order was never
+                    # filled (e.g. illiquid paper-trading option, DAY order
+                    # expired). Discard silently with $0 loss so it doesn't
+                    # count toward consecutive losses.
+                    logger.info("%s: order never filled (missing_scans=%d, never broker-confirmed) — discarding",
+                                sym, op.missing_scans)
+                    self.option_positions.pop(sym, None)
+                    self._open_risk.pop(sym, None)
+                else:
+                    # Was confirmed open, then vanished — expired/settled.
+                    self._finalize_option(op, current_premium=0.0, equity=equity,
+                                          action="expiry", reason="Expired worthless")
                 continue
             op.missing_scans = 0  # reset on successful broker confirmation
+            op.broker_confirmed = True
             # Alpaca reports option current_price as the per-share premium.
             try:
                 cur = float(getattr(bpos, "current_price", 0) or 0)
@@ -990,9 +1149,14 @@ class TradingAgent:
                 stop_loss=settings.OPTIONS_STOP_LOSS,
                 expiry_exit_days=settings.OPTIONS_EXPIRY_EXIT_DAYS)
             if action != "hold":
-                self.broker.close_option(sym)
-                self._finalize_option(op, current_premium=cur, equity=equity,
-                                      action=action, reason=reason)
+                # Only book the close if the sell-to-close actually succeeded —
+                # otherwise the contract is still live at the broker and we must
+                # keep managing it (retry next scan) rather than forget it.
+                if self.broker.close_option(sym):
+                    self._finalize_option(op, current_premium=cur, equity=equity,
+                                          action=action, reason=reason)
+                else:
+                    logger.warning("%s: close_option failed — keeping position, retry next scan", sym)
         self.option_store.save(self.option_positions)
 
     def _finalize_option(self, op, current_premium, equity, action, reason) -> None:
@@ -1182,6 +1346,11 @@ class TradingAgent:
         """
         current = {}
         for p in positions:
+            # Options have their own complete lifecycle in _manage_options; never
+            # track them here or their organic closes get double-booked as losses
+            # (this method runs BEFORE _manage_options each scan).
+            if is_option_asset(getattr(p, "asset_class", "")):
+                continue
             try:
                 current[p.symbol] = float(getattr(p, "unrealized_pl", 0) or 0)
             except (TypeError, ValueError):
@@ -1189,6 +1358,9 @@ class TradingAgent:
         for sym in set(self._pos_pnl) - set(current):
             if sym in self.managed or sym in self._closed_by_manager or sym in settings.CORE_HOLDINGS:
                 continue   # core holds + manager-booked closes aren't bot trades
+            if sym in self._kill_switch_closed:
+                self._kill_switch_closed.discard(sym)
+                continue   # force-closed by kill switch — don't count toward consecutive losses
             pnl = self._pos_pnl.get(sym, 0.0)
             risk = self._open_risk.get(sym) or abs(pnl) or 1.0
             rr = pnl / risk if risk else 0.0

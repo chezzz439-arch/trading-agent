@@ -443,19 +443,23 @@ class Broker:
     # Options (long calls/puts — buy-to-open / sell-to-close, single leg)
     # ------------------------------------------------------------------ #
     def get_option_positions(self) -> list[Any]:
-        """Only the option positions (asset_class us_option)."""
-        out = []
-        for p in self.get_positions():
-            if str(getattr(p, "asset_class", "")).endswith("us_option"):
-                out.append(p)
-        return out
+        """Only the option positions (asset_class us_option).
+
+        Uses ``is_option_asset`` — ``str(enum).endswith("us_option")`` is False
+        for the AssetClass enum, which silently hid every option from the lifecycle
+        manager (a root cause of the phantom-expiry losses).
+        """
+        from src.signals.options_strategy import is_option_asset
+        return [p for p in self.get_positions()
+                if is_option_asset(getattr(p, "asset_class", ""))]
 
     def buy_option(self, option_symbol: str, contracts: int) -> Any | None:
-        """Buy-to-open a long option (market, DAY). Returns the order or None.
+        """Buy-to-open a long option (market, DAY). DEPRECATED for live entries.
 
-        Single-leg long calls/puts only — max loss is the premium paid, so no
-        bracket/stop legs are attached (exits are managed by re-pricing the
-        premium each scan against the +100%/-50% rules).
+        Retained for compatibility/manual use only — the live path uses
+        ``buy_option_limit`` (limit orders + fill validation). Market orders on
+        wide options spreads fill at the ask and are the entry the rebuild
+        explicitly removes.
         """
         try:
             order = MarketOrderRequest(
@@ -469,6 +473,96 @@ class Broker:
         except Exception:
             logger.exception("buy_option failed for %s", option_symbol)
             return None
+
+    def buy_option_limit(
+        self, option_symbol: str, contracts: int, limit_price: float,
+        *, wait_seconds: int = 30,
+    ) -> tuple[int, float, str]:
+        """Buy-to-open a long option with a LIMIT order, then validate the fill.
+
+        Submits at ``limit_price``, polls the order for up to ``wait_seconds``,
+        and returns ``(filled_qty, avg_fill_price, status)``:
+
+          * filled_qty == contracts → fully filled.
+          * 0 < filled_qty < contracts → PARTIAL fill: the unfilled remainder is
+            canceled and we report the real partial qty (the caller records a
+            position for exactly the contracts that filled — never untracked).
+          * filled_qty == 0 → nothing filled; the order is CANCELED so it can't
+            fill later as a surprise, and no position is recorded.
+
+        ``avg_fill_price`` is the REAL per-share fill (the position's cost basis —
+        never the pre-trade quote). Bounded wait keeps the single-threaded scan
+        loop healthy. Defensive: any exception → (0, 0.0, "error").
+        """
+        import time as _time
+        try:
+            req = LimitOrderRequest(
+                symbol=option_symbol, qty=contracts, side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY, limit_price=round(float(limit_price), 2),
+            )
+            order = self._client.submit_order(req)
+        except Exception:
+            logger.exception("buy_option_limit submit failed for %s", option_symbol)
+            return (0, 0.0, "error")
+
+        oid = getattr(order, "id", None)
+        logger.info("OPTION limit buy %s x%d @ $%.2f submitted id=%s",
+                    option_symbol, contracts, limit_price, oid)
+
+        def _qty(o) -> int:
+            try:
+                return int(float(getattr(o, "filled_qty", 0) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        deadline = wait_seconds
+        waited = 0.0
+        step = 2.0
+        while waited < deadline:
+            try:
+                cur = self._client.get_order_by_id(oid)
+            except Exception:
+                logger.exception("get_order_by_id failed for %s", oid)
+                break
+            status = str(getattr(cur, "status", "")).lower()
+            fq = _qty(cur)
+            if status.endswith("filled") and fq >= contracts:
+                avg = float(getattr(cur, "filled_avg_price", 0) or 0)
+                logger.info("OPTION %s FILLED %d @ $%.2f", option_symbol, fq, avg)
+                return (fq, avg, "filled")
+            if status.endswith("canceled") or status.endswith("rejected") or status.endswith("expired"):
+                # Terminal before full fill — but it may have partially filled.
+                if fq > 0:
+                    avg = float(getattr(cur, "filled_avg_price", 0) or 0)
+                    logger.warning("OPTION %s %s with PARTIAL %d/%d @ $%.2f",
+                                   option_symbol, status, fq, contracts, avg)
+                    return (fq, avg, "partial")
+                logger.info("OPTION %s order %s before fill", option_symbol, status)
+                return (0, 0.0, status)
+            _time.sleep(step)
+            waited += step
+
+        # Timed out — settle the order, capturing any partial fill before canceling.
+        try:
+            cur = self._client.get_order_by_id(oid)
+            fq = _qty(cur)
+        except Exception:
+            fq = 0
+        try:
+            self._client.cancel_order_by_id(oid)
+        except Exception:
+            logger.warning("OPTION %s: cancel after timeout failed (id=%s)", option_symbol, oid)
+        if fq > 0:
+            try:
+                cur = self._client.get_order_by_id(oid)
+                avg = float(getattr(cur, "filled_avg_price", 0) or 0)
+            except Exception:
+                avg = 0.0
+            logger.warning("OPTION %s timeout with PARTIAL %d/%d @ $%.2f — remainder canceled",
+                           option_symbol, fq, contracts, avg)
+            return (fq, avg, "partial")
+        logger.info("OPTION %s limit unfilled in %ds — canceled", option_symbol, wait_seconds)
+        return (0, 0.0, "unfilled")
 
     def close_option(self, option_symbol: str) -> bool:
         """Sell-to-close an entire option position."""
