@@ -69,6 +69,17 @@ MAX_CONSECUTIVE_LOSSES: int = 20    # kill switch after N losing trades in a row
 MAX_CORRELATION: float = 0.80       # was 0.70 — was blocking borderline correlated names
 PORTFOLIO_HEAT_MAX: float = 0.40    # was 0.25 — allow more capital deployment
 
+# --- Self-managing portfolio-level caps (auto pause/resume, no manual MIN_SCORE) #
+# MAX_LEVERAGE: gross exposure (sum of |market value|) / equity ceiling. The bot
+# pauses ALL new entries while leverage is at/above this, and never opens an entry
+# that would push projected leverage over it. Resumes automatically once leverage
+# drops back under (e.g. after stops/trims fill). Set 0 to disable the gate.
+MAX_LEVERAGE: float = 1.5
+# MAX_SECTOR_PCT: max fraction of equity allowed in any single sector (sector comes
+# from watchlist.json meta). New entries in a sector at/over this cap are skipped.
+# This is the guard that would have prevented financials reaching 90%. Set 0 to disable.
+MAX_SECTOR_PCT: float = 0.35
+
 # Long-term "core holdings" the bot must NEVER touch — buy-and-hold positions
 # the user manages by hand. The agent won't adopt, manage, time-exit, trade, or
 # count them toward its heat/loss accounting. (Separate from the active book.)
@@ -77,7 +88,7 @@ CORE_HOLDINGS: set[str] = {"NVDA", "MSFT", "GOOGL", "AMZN", "MU", "LLY", "SPCX"}
 # --------------------------------------------------------------------------- #
 # Master scorer / ML
 # --------------------------------------------------------------------------- #
-MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade
+MIN_SCORE: float = 55.0            # minimum 0-100 score required to trade (new-entry pausing is now governed by MAX_LEVERAGE / MAX_SECTOR_PCT, not a manual override)
 PRERANK_TOP_N: int = 40            # was 20 — analyze more candidates per scan
 ML_ENABLED: bool = True            # XGBoost + RandomForest ensemble (LSTM TODO)
 ML_RETRAIN_DAYS: int = 30          # walk-forward retrain cadence
@@ -147,7 +158,7 @@ def load_watchlist_meta() -> dict:
 # When True, a signal scoring >= OPTIONS_MIN_SCORE buys an ATM call (long bias)
 # or ATM put (short bias) instead of the stock/short. Enabled 2026-06-10 on the
 # paper account for live experimentation (80+ conviction only).
-OPTIONS_ENABLED: bool = True
+OPTIONS_ENABLED: bool = False     # DISABLED 2026-06-26: was True — paper account has $0 options buying power (over-margined), every option entry 403s. Re-enable once options BP > 0.
 OPTIONS_MIN_SCORE: float = 65.0      # higher conviction bar than the stock MIN_SCORE
 OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive) — limits theta decay
 OPTIONS_DTE_MAX: int = 45

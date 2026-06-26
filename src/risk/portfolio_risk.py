@@ -48,6 +48,8 @@ class PortfolioRisk:
         portfolio_heat_max: float = 0.06,
         min_score: float = 70.0,
         min_rr: float = 5.0,
+        max_leverage: float = 0.0,
+        max_sector_pct: float = 0.0,
     ) -> None:
         self.max_positions = max_positions
         self.daily_loss_limit = daily_loss_limit
@@ -57,6 +59,9 @@ class PortfolioRisk:
         self.portfolio_heat_max = portfolio_heat_max
         self.min_score = min_score
         self.min_rr = min_rr
+        # Portfolio-level auto caps. 0 (falsy) disables the respective gate.
+        self.max_leverage = max_leverage
+        self.max_sector_pct = max_sector_pct
         self._day_start_equity: Optional[float] = None
         self._week_start_equity: Optional[float] = None
         self._consecutive_losses = 0
@@ -100,6 +105,59 @@ class PortfolioRisk:
             self.halted = True
             return True
         return False
+
+    # ------------------------------------------------------------------ #
+    # Portfolio-level auto caps (leverage + sector concentration)
+    # ------------------------------------------------------------------ #
+    def leverage_gate(
+        self,
+        gross_exposure: float,
+        equity: float,
+        new_notional: float = 0.0,
+    ) -> tuple[bool, float, float, str]:
+        """Gate new entries on gross leverage (= gross_exposure / equity).
+
+        Returns ``(allowed, current_leverage, projected_leverage, reason)``.
+        Blocks when leverage is already at/above ``max_leverage`` (pauses ALL
+        new entries) or when adding ``new_notional`` would push projected
+        leverage above the cap. ``max_leverage=0`` disables the gate.
+        """
+        if not self.max_leverage or equity <= 0:
+            return True, 0.0, 0.0, ""
+        current = gross_exposure / equity
+        projected = (gross_exposure + max(0.0, new_notional)) / equity
+        if current >= self.max_leverage:
+            return (False, current, projected,
+                    f"leverage {current:.2f}x at/above {self.max_leverage:.2f}x cap")
+        if projected > self.max_leverage:
+            return (False, current, projected,
+                    f"entry would push leverage {current:.2f}x -> {projected:.2f}x "
+                    f"> {self.max_leverage:.2f}x cap")
+        return True, current, projected, ""
+
+    def sector_gate(
+        self,
+        sector: str,
+        sector_exposure: float,
+        equity: float,
+        new_notional: float = 0.0,
+    ) -> tuple[bool, float, str]:
+        """Gate a new entry on single-sector concentration.
+
+        Returns ``(allowed, current_pct, reason)``. Blocks when the candidate's
+        sector is already at/above ``max_sector_pct`` of equity, or when adding
+        ``new_notional`` would push it over. ``max_sector_pct=0`` disables it.
+        """
+        if not self.max_sector_pct or equity <= 0 or not sector:
+            return True, 0.0, ""
+        current = sector_exposure / equity
+        projected = (sector_exposure + max(0.0, new_notional)) / equity
+        if projected > self.max_sector_pct:
+            return (False, current,
+                    f"{sector} at {current*100:.0f}% of equity "
+                    f"(+entry -> {projected*100:.0f}%) > {self.max_sector_pct*100:.0f}% "
+                    f"cap — skipping new {sector} entries")
+        return True, current, ""
 
     # ------------------------------------------------------------------ #
     # Pre-trade gate + sizing

@@ -114,6 +114,8 @@ class TradingAgent:
             max_correlation=settings.MAX_CORRELATION,
             portfolio_heat_max=settings.PORTFOLIO_HEAT_MAX,
             min_score=settings.MIN_SCORE, min_rr=settings.RR_RATIO,
+            max_leverage=settings.MAX_LEVERAGE,
+            max_sector_pct=settings.MAX_SECTOR_PCT,
         )
         self.broker = Broker(k, s, paper=settings.PAPER)
         self.dashboard = Dashboard(log_dir=settings.LOG_DIR)
@@ -190,6 +192,14 @@ class TradingAgent:
         self._regime_gate: dict = {"enabled": settings.REGIME_GATE_ENABLED,
                                    "closed": False, "spy": None, "ema": None,
                                    "reason": "not yet evaluated"}
+        # Auto leverage gate: recomputed each cycle from gross exposure / equity.
+        # ``paused`` True => pause ALL new entries until leverage drops under the
+        # cap. Default open so the first cycle (before positions are read) never
+        # blocks. Sector exposure tally is rebuilt each scan from live positions.
+        self._leverage_gate: dict = {"leverage": 0.0, "cap": settings.MAX_LEVERAGE,
+                                     "paused": False, "reason": "not yet evaluated"}
+        self._gross_exposure: float = 0.0
+        self._sector_exposure: dict = {}
 
     @staticmethod
     def _validate_credentials() -> None:
@@ -338,6 +348,7 @@ class TradingAgent:
             "open_positions": [], "scores": [], "closed_today": [],
             "managed": [], "options": [], "research": {}, "source_status": {},
             "regime_gate": self._regime_gate,
+            "leverage_gate": self._leverage_gate,
         })
 
         # Dashboard HALT button (cross-process control flag).
@@ -495,6 +506,32 @@ class TradingAgent:
             logger.info("Regime gate ACTIVE — SPY below 50 EMA (%s), pausing new entries",
                         self._regime_gate["reason"])
 
+        # --- Auto leverage + sector caps: self-managing, recomputed each cycle - #
+        # Gross exposure and per-sector exposure are rebuilt from live positions
+        # so the gates pause/resume automatically as stops, trims, and entries
+        # change the book — no manual MIN_SCORE override needed.
+        def _mv(p):
+            try:
+                return abs(float(getattr(p, "market_value", 0) or 0))
+            except (TypeError, ValueError):
+                return 0.0
+        self._gross_exposure = sum(_mv(p) for p in positions)
+        self._sector_exposure = {}
+        for p in positions:
+            sec = (self.meta.get(p.symbol, {}) or {}).get("sector") or "Unknown"
+            self._sector_exposure[sec] = self._sector_exposure.get(sec, 0.0) + _mv(p)
+        lev_ok, lev_now, _lev_proj, lev_reason = self.portfolio.leverage_gate(
+            self._gross_exposure, equity)
+        self._leverage_gate = {"leverage": lev_now, "cap": settings.MAX_LEVERAGE,
+                               "paused": not lev_ok, "reason": lev_reason}
+        if settings.MAX_LEVERAGE:
+            if not lev_ok:
+                logger.info("Leverage %.2fx above %.2fx cap — new entries paused",
+                            lev_now, settings.MAX_LEVERAGE)
+            else:
+                logger.info("Leverage %.2fx — entries allowed (cap %.2fx)",
+                            lev_now, settings.MAX_LEVERAGE)
+
         # --- Full pass: expensive pipeline (quant/MTF/ML) only on top N --- #
         scores_for_dash = []
         for c in top:
@@ -615,6 +652,12 @@ class TradingAgent:
         self._research_view[symbol] = self._research_card(research)
         dash_row = {"symbol": symbol, "side": side, "score": score.total,
                     "passed": score.passed, "research": applied}
+        # ---- Auto leverage cap: pause ALL new entries while over the cap ---- #
+        # Symbol is still scored above (dashboard); no new equity OR option entry
+        # is opened until leverage drops back under the cap (auto-resumes).
+        if self._leverage_gate.get("paused"):
+            logger.debug("%s: held back — %s", symbol, self._leverage_gate.get("reason"))
+            return dash_row
         # Options override: a high score with no equity plan can still be expressed
         # as a long option (the option premium is the defined risk, no 5:1 plan needed).
         # Try options first; if it enters, return. If not, fall through to normal gate.
@@ -713,6 +756,22 @@ class TradingAgent:
             logger.info("%s: blocked by portfolio heat", symbol)
             return dash_row
 
+        # ---- Per-entry leverage + sector caps (projected, post-sizing) --- #
+        # The per-scan pause above covers the "already over cap" case; these two
+        # stop a single sized entry from pushing gross leverage or its sector
+        # over the configured caps.
+        lev_ok, _ln, _lp, lev_reason = self.portfolio.leverage_gate(
+            self._gross_exposure, equity, trade.notional)
+        if not lev_ok:
+            logger.info("%s: blocked — %s", symbol, lev_reason)
+            return dash_row
+        sector = m.get("sector") or "Unknown"
+        sec_ok, _sp, sec_reason = self.portfolio.sector_gate(
+            sector, self._sector_exposure.get(sector, 0.0), equity, trade.notional)
+        if not sec_ok:
+            logger.info("%s: %s", symbol, sec_reason)
+            return dash_row
+
         # ---- Phase 9: smart entry --------------------------------------- #
         limit_px = tech.values.get("ema21")  # pullback reference for ranging regimes
         order = self.broker.place_smart_entry(trade, regime_label=regime.label,
@@ -720,6 +779,11 @@ class TradingAgent:
         if order is not None:
             committed.add(symbol)
             self._open_risk[symbol] = trade.dollar_risk
+            # Keep the auto-cap tallies current so later candidates in this same
+            # scan account for the exposure this entry just added.
+            self._gross_exposure += trade.notional
+            self._sector_exposure[sector] = (
+                self._sector_exposure.get(sector, 0.0) + trade.notional)
             logger.info("%s: ENTERED score=%.0f rr=%.1f risk=$%.2f frac=%.3f%%",
                         symbol, score.total, plan.rr, trade.dollar_risk, fraction * 100)
             if settings.RESEARCH_ENABLED:
@@ -1336,6 +1400,7 @@ class TradingAgent:
             "options": options,
             "research": self._research_view, "source_status": self._source_status,
             "regime_gate": self._regime_gate,
+            "leverage_gate": self._leverage_gate,
         })
 
     def _detect_closed_trades(self, positions, equity) -> None:
