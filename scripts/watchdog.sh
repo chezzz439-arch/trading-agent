@@ -21,12 +21,29 @@ ROOT="$(pwd)"
 STATE="logs/agent_state.json"
 PIDFILE=".agent.pid"
 LOG="logs/watchdog.log"
+LOCKDIR=".launch.lock"           # shared mutex with restart.sh — prevents
+                                 # concurrent kill+relaunch (duplicate agents)
+AGENT_PAT="[Pp]ython[0-9.]* main\.py"
 # Stale threshold: 2.5x the 240s scan interval, matching the dashboard's own
 # "online" cutoff. A healthy agent rewrites state every scan (~4 min).
 STALE_SECS=600
 
 mkdir -p logs
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG"; }
+
+# Shared launch lock (mkdir is atomic; macOS has no flock). Serializes against a
+# manual ./restart.sh so the two can't both relaunch and create duplicates.
+acquire_lock() {
+  local tries=0 age
+  while ! mkdir "$LOCKDIR" 2>/dev/null; do
+    age=$(( $(date +%s) - $(stat -f %m "$LOCKDIR" 2>/dev/null || echo 0) ))
+    if [ "$age" -ge 120 ]; then rm -rf "$LOCKDIR" 2>/dev/null || true; continue; fi
+    tries=$((tries + 1))
+    [ "$tries" -ge 30 ] && { log "could not acquire launch lock (held ${age}s) — standing down"; exit 0; }
+    sleep 1
+  done
+  trap 'rm -rf "$LOCKDIR" 2>/dev/null' EXIT
+}
 
 # Deliberate shutdown (stop.sh removed the pid) -> stand down.
 [ -f "$PIDFILE" ] || exit 0
@@ -61,6 +78,21 @@ fi
 # Healthy -> nothing to do.
 [ -n "$reason" ] || exit 0
 
+# Take the shared lock before touching processes so we can't race a manual
+# ./restart.sh. If restart.sh is mid-relaunch we'll block here until it's done.
+acquire_lock
+
+# Re-check under the lock: restart.sh (or a prior watchdog) may have already
+# relaunched a healthy agent while we were waiting — if so, stand down.
+PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+if alive; then
+  age="$(state_age)"
+  if [ "$age" -le "$STALE_SECS" ]; then
+    log "stood down — agent pid $PID healthy after acquiring lock (state ${age}s)"
+    exit 0
+  fi
+fi
+
 log "RESTART: $reason"
 
 # Telegram heads-up (best effort; never blocks the restart).
@@ -80,8 +112,16 @@ if alive; then
   for _ in 1 2 3 4 5 6 7 8; do alive || break; sleep 1; done
   alive && { kill -KILL "$PID" 2>/dev/null; log "force-killed $PID"; }
 fi
-# Sweep any stray main.py so we don't end up with duplicates.
-pkill -if "python main.py" 2>/dev/null && sleep 1 || true
+# Sweep any stray agents (incl. framework "Python main.py") so we never end up
+# with duplicates: TERM, wait, then KILL whatever ignored it.
+strays() { pgrep -if "$AGENT_PAT" 2>/dev/null || true; }
+if [ -n "$(strays)" ]; then
+  # shellcheck disable=SC2046
+  kill -TERM $(strays) 2>/dev/null || true
+  for _ in 1 2 3 4 5; do [ -z "$(strays)" ] && break; sleep 1; done
+  # shellcheck disable=SC2046
+  [ -n "$(strays)" ] && { kill -KILL $(strays) 2>/dev/null || true; sleep 1; }
+fi
 
 # Relaunch in the background (mirrors start.sh step 5).
 DATE="$(date -u +%Y%m%d)"
