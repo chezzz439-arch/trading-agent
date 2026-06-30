@@ -74,7 +74,7 @@ PORTFOLIO_HEAT_MAX: float = 0.40    # was 0.25 — allow more capital deployment
 # pauses ALL new entries while leverage is at/above this, and never opens an entry
 # that would push projected leverage over it. Resumes automatically once leverage
 # drops back under (e.g. after stops/trims fill). Set 0 to disable the gate.
-MAX_LEVERAGE: float = 1.5
+MAX_LEVERAGE: float = 2.0
 # MAX_SECTOR_PCT: max fraction of equity allowed in any single sector (sector comes
 # from watchlist.json meta). New entries in a sector at/over this cap are skipped.
 # This is the guard that would have prevented financials reaching 90%. Set 0 to disable.
@@ -158,7 +158,7 @@ def load_watchlist_meta() -> dict:
 # When True, a signal scoring >= OPTIONS_MIN_SCORE buys an ATM call (long bias)
 # or ATM put (short bias) instead of the stock/short. Enabled 2026-06-10 on the
 # paper account for live experimentation (80+ conviction only).
-OPTIONS_ENABLED: bool = False     # DISABLED 2026-06-26: was True — paper account has $0 options buying power (over-margined), every option entry 403s. Re-enable once options BP > 0.
+OPTIONS_ENABLED: bool = True      # RE-ENABLED 2026-06-26: options buying power recovered (>$11k) after the financials trim freed cash; new option entries are still gated by MAX_LEVERAGE until leverage < 1.5x.
 OPTIONS_MIN_SCORE: float = 65.0      # higher conviction bar than the stock MIN_SCORE
 OPTIONS_DTE_MIN: int = 30            # days-to-expiration window (inclusive) — limits theta decay
 OPTIONS_DTE_MAX: int = 45
@@ -220,7 +220,7 @@ LONG_ONLY: bool = True
 # falling market. Affects NEW entries only — open positions keep their normal
 # stops/targets/trailing/scale-outs and are never force-closed. Set False to
 # trade entries regardless of the market trend.
-REGIME_GATE_ENABLED: bool = False
+REGIME_GATE_ENABLED: bool = True
 
 # --------------------------------------------------------------------------- #
 # Crypto activation (2026-06-10)
