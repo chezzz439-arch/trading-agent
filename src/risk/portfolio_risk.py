@@ -90,11 +90,14 @@ class PortfolioRisk:
     # ------------------------------------------------------------------ #
     def kill_switch_triggered(self, current_equity: float) -> bool:
         reasons = []
-        if self._day_start_equity:
+        # Guard with ``is not None and > 0`` rather than truthiness: a baseline of
+        # exactly 0.0 is falsy and would silently skip the drawdown checks. (>0 is
+        # still required to avoid dividing by a zero baseline.)
+        if self._day_start_equity is not None and self._day_start_equity > 0:
             dd = (self._day_start_equity - current_equity) / self._day_start_equity
             if dd >= self.daily_loss_limit:
                 reasons.append(f"daily DD {dd*100:.1f}%>={self.daily_loss_limit*100:.0f}%")
-        if self._week_start_equity:
+        if self._week_start_equity is not None and self._week_start_equity > 0:
             wdd = (self._week_start_equity - current_equity) / self._week_start_equity
             if wdd >= self.weekly_loss_limit:
                 reasons.append(f"weekly DD {wdd*100:.1f}%>={self.weekly_loss_limit*100:.0f}%")
@@ -215,16 +218,42 @@ class PortfolioRisk:
     # ------------------------------------------------------------------ #
     # Portfolio heat
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _finite_risk_sum(open_risk_dollars: Iterable[float]) -> Optional[float]:
+        """Sum open-risk dollars, returning None if ANY value is non-finite.
+
+        A NaN/inf risk means we don't actually know our exposure, so callers must
+        treat None as "unknown" and fail safe (block the trade) rather than let a
+        ``NaN > cap`` comparison (which is False) silently open the heat gate.
+        """
+        total = 0.0
+        for r in open_risk_dollars:
+            try:
+                r = float(r)
+            except (TypeError, ValueError):
+                return None
+            if not np.isfinite(r):
+                return None
+            total += r
+        return total
+
     def portfolio_heat(self, open_risk_dollars: Iterable[float], equity: float) -> float:
         if equity <= 0:
             return 0.0
-        return float(sum(open_risk_dollars)) / equity
+        total = self._finite_risk_sum(open_risk_dollars)
+        if total is None:
+            return float("nan")   # honestly signal "unknown" to monitoring
+        return total / equity
 
     def heat_allows(self, open_risk_dollars: Iterable[float], new_risk: float, equity: float) -> bool:
         if equity <= 0:
             return False
-        total = (sum(open_risk_dollars) + new_risk) / equity
-        if total > self.portfolio_heat_max:
+        existing = self._finite_risk_sum(open_risk_dollars)
+        if existing is None or not np.isfinite(new_risk):
+            logger.warning("Portfolio heat: non-finite open risk — blocking new entry (fail-safe)")
+            return False
+        total = (existing + float(new_risk)) / equity
+        if not np.isfinite(total) or total > self.portfolio_heat_max:
             logger.info("Portfolio heat %.1f%% would exceed cap %.1f%%",
                         total * 100, self.portfolio_heat_max * 100)
             return False

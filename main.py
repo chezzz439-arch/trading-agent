@@ -317,7 +317,15 @@ class TradingAgent:
 
     def _on_exit(self) -> None:
         try:
-            self.dashboard.daily_report(self._build_state([], []))
+            try:
+                equity = self.broker.get_equity()
+                buying_power = self.broker.get_buying_power()
+                positions = self.broker.get_positions()
+            except Exception:
+                equity, buying_power, positions = 0.0, 0.0, []
+            self.dashboard.daily_report(
+                self._build_state(positions, [], equity, buying_power)
+            )
         except Exception:
             logger.exception("daily report on exit failed")
         if self._streamlit_proc is not None:

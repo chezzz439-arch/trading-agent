@@ -24,7 +24,7 @@ import json
 import logging
 import math
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,10 @@ class ManagedPosition:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ManagedPosition":
-        return cls(**d)
+        # Filter to known dataclass fields so a forward-compat key written by a
+        # newer version (or a stray key) doesn't raise and drop the position.
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 # ============================================================================ #
@@ -243,9 +246,17 @@ class PositionStore:
         try:
             with open(self.path) as f:
                 data = json.load(f)
-            return {sym: ManagedPosition.from_dict(d) for sym, d in data.items()}
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
         except Exception:
             logger.exception("PositionStore.load failed")
             return {}
+        # Rebuild per-record so one malformed entry can't wipe the whole book —
+        # skip the bad record (logged) and keep every position that parses.
+        out: dict[str, ManagedPosition] = {}
+        for sym, d in data.items():
+            try:
+                out[sym] = ManagedPosition.from_dict(d)
+            except Exception:
+                logger.exception("PositionStore.load: skipping malformed record %s", sym)
+        return out

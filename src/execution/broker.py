@@ -193,7 +193,14 @@ class Broker:
             side=side,
             time_in_force=TimeInForce.GTC,
         )
-        result = self._client.submit_order(order)
+        # Guard the submit like every other order path so a venue/network error
+        # honours the documented "returns None on failure" contract instead of
+        # propagating (place_smart_entry reaches this method outside any try).
+        try:
+            result = self._client.submit_order(order)
+        except Exception:
+            logger.exception("crypto entry submit failed for %s", plan.symbol)
+            return None
         logger.info("Crypto entry accepted id=%s status=%s", result.id, result.status)
         return result
 

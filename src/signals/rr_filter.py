@@ -123,7 +123,11 @@ class RRFilter:
 
             entry, stop, target = _round(entry), _round(stop), _round(target)
             risk_per_share = abs(entry - stop)
-            if risk_per_share <= 0 or stop <= 0 or target <= 0:
+            # Reject non-finite levels too: a NaN/inf entry slips past the ``<= 0``
+            # checks (``NaN <= 0`` is False) and would yield a NaN/inf TradePlan
+            # that pollutes scores and dashboards downstream.
+            if (not np.isfinite([entry, stop, target, risk_per_share]).all()
+                    or risk_per_share <= 0 or stop <= 0 or target <= 0):
                 return None
 
             # --- Legacy hard veto (only when NOT hybrid) ----------------- #

@@ -50,7 +50,13 @@ class PositionSizer:
         floored to whole shares.
         """
         try:
-            if equity <= 0 or plan.risk_per_share <= 0 or plan.entry <= 0:
+            # Reject non-finite inputs up front: a NaN/inf risk_per_share or entry
+            # slips past the ``<= 0`` checks (``NaN <= 0`` is False) and later blows
+            # up at ``math.floor(NaN)``, which is caught but logs a full traceback
+            # every bad bar. Same safe outcome (None), without the noise.
+            if (not math.isfinite(equity) or equity <= 0
+                    or not math.isfinite(plan.risk_per_share) or plan.risk_per_share <= 0
+                    or not math.isfinite(plan.entry) or plan.entry <= 0):
                 return None
 
             # 1) Risk-based quantity: dollars at risk == risk_per_trade * equity.
